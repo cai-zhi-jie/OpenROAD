@@ -103,32 +103,32 @@ else()
   set(OPENSTA_LIBRARY "sta_swig")
 endif()
 
-if(USE_SYSTEM_ABC)
-  if(NOT ABC_LIBRARY)
-    find_library(ABC_LIBRARY NAMES abc
-                 PATHS
-                 /usr/lib
-                 /usr/lib64
-                 /usr/local/lib
-                 /usr/local/lib64)
-    if(ABC_LIBRARY)
-      message(STATUS "Found ABC: ${ABC_LIBRARY}")
-      # make sure link dl symbols
-      list(APPEND ABC_LIBRARY "dl")
-    else()
-      message(FATAL_ERROR "ABC not found, set the ABC_LIBRARY manually.")
-    endif()
-  endif()
-  if(NOT ABC_INCLUDE_DIR)
-    set(ABC_INCLUDE_DIR "/usr/include/abc")
-  endif()
-  add_definitions(-DABC_USE_STDINT_H=1)
-  include_directories(${ABC_INCLUDE_DIR})
-  message(STATUS "Using ABC_INCLUDE_DIR=${ABC_INCLUDE_DIR}")
-else()
-  # local build of abc
-  set(ABC_LIBRARY "libabc")
-endif()
+# if(USE_SYSTEM_ABC)
+#   if(NOT ABC_LIBRARY)
+#     find_library(ABC_LIBRARY NAMES abc
+#                  PATHS
+#                  /usr/lib
+#                  /usr/lib64
+#                  /usr/local/lib
+#                  /usr/local/lib64)
+#     if(ABC_LIBRARY)
+#       message(STATUS "Found ABC: ${ABC_LIBRARY}")
+#       # make sure link dl symbols
+#       list(APPEND ABC_LIBRARY "dl")
+#     else()
+#       message(FATAL_ERROR "ABC not found, set the ABC_LIBRARY manually.")
+#     endif()
+#   endif()
+#   if(NOT ABC_INCLUDE_DIR)
+#     set(ABC_INCLUDE_DIR "/usr/include/abc")
+#   endif()
+#   add_definitions(-DABC_USE_STDINT_H=1)
+#   include_directories(${ABC_INCLUDE_DIR})
+#   message(STATUS "Using ABC_INCLUDE_DIR=${ABC_INCLUDE_DIR}")
+# else()
+#   # local build of abc
+#   set(ABC_LIBRARY "libabc")
+# endif()
 
 ################################################################
 
@@ -251,8 +251,8 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 ################################################################
 
 # Build flow tools
-add_subdirectory(ifp)
-add_subdirectory(pad)
+# add_subdirectory(ifp)
+# add_subdirectory(pad)
 add_subdirectory(odb)
 if (NOT USE_SYSTEM_OPENSTA)
   if (TCL_READLINE_LIBRARY AND TCL_READLINE_H)
@@ -264,28 +264,28 @@ endif()
 add_subdirectory(dbSta)
 add_subdirectory(rsz)
 add_subdirectory(stt)
-add_subdirectory(gpl)
+# add_subdirectory(gpl)
 add_subdirectory(dpl)
 add_subdirectory(dpo)
-add_subdirectory(fin)
-add_subdirectory(ppl)
-add_subdirectory(rmp)
-add_subdirectory(cts)
+# add_subdirectory(fin)
+# add_subdirectory(ppl)
+# add_subdirectory(rmp)
+# add_subdirectory(cts)
 add_subdirectory(grt)
-add_subdirectory(tap)
-add_subdirectory(mpl)
+# add_subdirectory(tap)
+# add_subdirectory(mpl)
 add_subdirectory(rcx)
-add_subdirectory(psm)
+# add_subdirectory(psm)
 add_subdirectory(ant)
 add_subdirectory(gui)
 add_subdirectory(drt)
 add_subdirectory(upf)
 add_subdirectory(utl)
 add_subdirectory(dst)
-add_subdirectory(pdn)
-add_subdirectory(dft)
-add_subdirectory(mpl2)
-add_subdirectory(par)
+# add_subdirectory(pdn)
+# add_subdirectory(dft)
+# add_subdirectory(mpl2)
+# add_subdirectory(par)
 
 ################################################################
 
@@ -318,38 +318,38 @@ target_include_directories(openroad
 )
 
 target_link_libraries(openroad
-  ifp
-  pad
+  # ifp
+  # pad
   openroad_swig
-  gpl
+  # gpl
   dpl
   dpo
-  fin
+  # fin
   rsz
-  ppl
+  # ppl
   stt
   dbSta
   OpenSTA
   odb
   odbtcl
   rcx
-  rmp
-  cts
+  # rmp
+  # cts
   grt
-  tap
+  # tap
   gui
   drt
   dst
-  mpl
-  psm
+  # mpl
+  # psm
   ant
   upf
   utl
-  pdn
-  dft
-  mpl2
-  par
-  ${ABC_LIBRARY}
+  # pdn
+  # dft
+  # mpl2
+  # par
+  # ${ABC_LIBRARY}
   ${TCL_LIBRARY}
   ${CMAKE_THREAD_LIBS_INIT}
 )
@@ -404,26 +404,26 @@ if (Python3_FOUND AND BUILD_PYTHON)
   target_link_libraries(openroad
     openroad_swig_py
     odb_py
-    ifp_py
+    # ifp_py
     utl_py
     ant_py
     grt_py
-    gpl_py
+    # gpl_py
     dpl_py
-    mpl_py
-    ppl_py
-    tap_py
-    cts_py
+    # mpl_py
+    # ppl_py
+    # tap_py
+    # cts_py
     drt_py
     dpo_py
-    fin_py
+    # fin_py
     rcx_py
-    rmp_py
+    # rmp_py
     stt_py
-    psm_py
-    pdn_py
-    dft_py
-    par_py
+    # psm_py
+    # pdn_py
+    # dft_py
+    # par_py
   )
 
 else()

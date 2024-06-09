@@ -63,25 +63,25 @@ namespace rsz {
 class Resizer;
 }
 
-namespace ppl {
-class IOPlacer;
-}
+// namespace ppl {
+// class IOPlacer;
+// }
 
-namespace rmp {
-class Restructure;
-}
+// namespace rmp {
+// class Restructure;
+// }
 
-namespace cts {
-class TritonCTS;
-}
+// namespace cts {
+// class TritonCTS;
+// }
 
 namespace grt {
 class GlobalRouter;
 }
 
-namespace tap {
-class Tapcell;
-}
+// namespace tap {
+// class Tapcell;
+// }
 
 namespace dpl {
 class Opendp;
@@ -91,21 +91,21 @@ namespace dpo {
 class Optdp;
 }
 
-namespace fin {
-class Finale;
-}
+// namespace fin {
+// class Finale;
+// }
 
-namespace mpl {
-class MacroPlacer;
-}
+// namespace mpl {
+// class MacroPlacer;
+// }
 
-namespace mpl2 {
-class MacroPlacer2;
-}
+// namespace mpl2 {
+// class MacroPlacer2;
+// }
 
-namespace gpl {
-class Replace;
-}
+// namespace gpl {
+// class Replace;
+// }
 
 namespace rcx {
 class Ext;
@@ -115,25 +115,25 @@ namespace drt {
 class TritonRoute;
 }
 
-namespace psm {
-class PDNSim;
-}
+// namespace psm {
+// class PDNSim;
+// }
 
 namespace ant {
 class AntennaChecker;
 }
 
-namespace par {
-class PartitionMgr;
-}
+// namespace par {
+// class PartitionMgr;
+// }
 
-namespace pdn {
-class PdnGen;
-}
+// namespace pdn {
+// class PdnGen;
+// }
 
-namespace pad {
-class ICeWall;
-}
+// namespace pad {
+// class ICeWall;
+// }
 
 namespace utl {
 class Logger;
@@ -146,9 +146,9 @@ namespace stt {
 class SteinerTreeBuilder;
 }
 
-namespace dft {
-class Dft;
-}
+// namespace dft {
+// class Dft;
+// }
 
 namespace ord {
 
@@ -173,28 +173,28 @@ class OpenRoad
   sta::dbSta* getSta() { return sta_; }
   sta::dbNetwork* getDbNetwork();
   rsz::Resizer* getResizer() { return resizer_; }
-  rmp::Restructure* getRestructure() { return restructure_; }
-  cts::TritonCTS* getTritonCts() { return tritonCts_; }
+  // rmp::Restructure* getRestructure() { return restructure_; }
+  // cts::TritonCTS* getTritonCts() { return tritonCts_; }
   dbVerilogNetwork* getVerilogNetwork() { return verilog_network_; }
   dpl::Opendp* getOpendp() { return opendp_; }
   dpo::Optdp* getOptdp() { return optdp_; }
-  fin::Finale* getFinale() { return finale_; }
-  tap::Tapcell* getTapcell() { return tapcell_; }
-  mpl::MacroPlacer* getMacroPlacer() { return macro_placer_; }
-  mpl2::MacroPlacer2* getMacroPlacer2() { return macro_placer2_; }
+  // fin::Finale* getFinale() { return finale_; }
+  // tap::Tapcell* getTapcell() { return tapcell_; }
+  // mpl::MacroPlacer* getMacroPlacer() { return macro_placer_; }
+  // mpl2::MacroPlacer2* getMacroPlacer2() { return macro_placer2_; }
   rcx::Ext* getOpenRCX() { return extractor_; }
   drt::TritonRoute* getTritonRoute() { return detailed_router_; }
-  gpl::Replace* getReplace() { return replace_; }
-  psm::PDNSim* getPDNSim() { return pdnsim_; }
+  // gpl::Replace* getReplace() { return replace_; }
+  // psm::PDNSim* getPDNSim() { return pdnsim_; }
   grt::GlobalRouter* getGlobalRouter() { return global_router_; }
-  par::PartitionMgr* getPartitionMgr() { return partitionMgr_; }
+  // par::PartitionMgr* getPartitionMgr() { return partitionMgr_; }
   ant::AntennaChecker* getAntennaChecker() { return antenna_checker_; }
-  ppl::IOPlacer* getIOPlacer() { return ioPlacer_; }
-  pdn::PdnGen* getPdnGen() { return pdngen_; }
-  pad::ICeWall* getICeWall() { return icewall_; }
+  // ppl::IOPlacer* getIOPlacer() { return ioPlacer_; }
+  // pdn::PdnGen* getPdnGen() { return pdngen_; }
+  // pad::ICeWall* getICeWall() { return icewall_; }
   dst::Distributed* getDistributed() { return distributer_; }
   stt::SteinerTreeBuilder* getSteinerTreeBuilder() { return stt_builder_; }
-  dft::Dft* getDft() { return dft_; }
+  // dft::Dft* getDft() { return dft_; }
 
   // Return the bounding box of the db rows.
   odb::Rect getCore();
@@ -266,27 +266,27 @@ class OpenRoad
   dbVerilogNetwork* verilog_network_ = nullptr;
   sta::dbSta* sta_ = nullptr;
   rsz::Resizer* resizer_ = nullptr;
-  ppl::IOPlacer* ioPlacer_ = nullptr;
+  // ppl::IOPlacer* ioPlacer_ = nullptr;
   dpl::Opendp* opendp_ = nullptr;
   dpo::Optdp* optdp_ = nullptr;
-  fin::Finale* finale_ = nullptr;
-  mpl::MacroPlacer* macro_placer_ = nullptr;
-  mpl2::MacroPlacer2* macro_placer2_ = nullptr;
+  // fin::Finale* finale_ = nullptr;
+  // mpl::MacroPlacer* macro_placer_ = nullptr;
+  // mpl2::MacroPlacer2* macro_placer2_ = nullptr;
   grt::GlobalRouter* global_router_ = nullptr;
-  rmp::Restructure* restructure_ = nullptr;
-  cts::TritonCTS* tritonCts_ = nullptr;
-  tap::Tapcell* tapcell_ = nullptr;
+  // rmp::Restructure* restructure_ = nullptr;
+  // cts::TritonCTS* tritonCts_ = nullptr;
+  // tap::Tapcell* tapcell_ = nullptr;
   rcx::Ext* extractor_ = nullptr;
   drt::TritonRoute* detailed_router_ = nullptr;
   ant::AntennaChecker* antenna_checker_ = nullptr;
-  gpl::Replace* replace_ = nullptr;
-  psm::PDNSim* pdnsim_ = nullptr;
-  par::PartitionMgr* partitionMgr_ = nullptr;
-  pdn::PdnGen* pdngen_ = nullptr;
-  pad::ICeWall* icewall_ = nullptr;
+  // gpl::Replace* replace_ = nullptr;
+  // psm::PDNSim* pdnsim_ = nullptr;
+  // par::PartitionMgr* partitionMgr_ = nullptr;
+  // pdn::PdnGen* pdngen_ = nullptr;
+  // pad::ICeWall* icewall_ = nullptr;
   dst::Distributed* distributer_ = nullptr;
   stt::SteinerTreeBuilder* stt_builder_ = nullptr;
-  dft::Dft* dft_ = nullptr;
+  // dft::Dft* dft_ = nullptr;
 
   std::set<OpenRoadObserver*> observers_;
 

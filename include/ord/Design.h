@@ -49,9 +49,9 @@ class dbInst;
 class dbITerm;
 }  // namespace odb
 
-namespace ifp {
-class InitFloorplan;
-}
+// namespace ifp {
+// class InitFloorplan;
+// }
 
 namespace utl {
 class Logger;
@@ -65,29 +65,29 @@ namespace grt {
 class GlobalRouter;
 }
 
-namespace gpl {
-class Replace;
-}
+// namespace gpl {
+// class Replace;
+// }
 
 namespace dpl {
 class Opendp;
 }
 
-namespace mpl {
-class MacroPlacer;
-}
+// namespace mpl {
+// class MacroPlacer;
+// }
 
-namespace ppl {
-class IOPlacer;
-}
+// namespace ppl {
+// class IOPlacer;
+// }
 
-namespace tap {
-class Tapcell;
-}
+// namespace tap {
+// class Tapcell;
+// }
 
-namespace cts {
-class TritonCTS;
-}
+// namespace cts {
+// class TritonCTS;
+// }
 
 namespace drt {
 class TritonRoute;
@@ -97,37 +97,37 @@ namespace dpo {
 class Optdp;
 }
 
-namespace fin {
-class Finale;
-}
+// namespace fin {
+// class Finale;
+// }
 
-namespace par {
-class PartitionMgr;
-}
+// namespace par {
+// class PartitionMgr;
+// }
 
 namespace rcx {
 class Ext;
 }
 
-namespace rmp {
-class Restructure;
-}
+// namespace rmp {
+// class Restructure;
+// }
 
 namespace stt {
 class SteinerTreeBuilder;
 }
 
-namespace psm {
-class PDNSim;
-}
+// namespace psm {
+// class PDNSim;
+// }
 
-namespace pdn {
-class PdnGen;
-}
+// namespace pdn {
+// class PdnGen;
+// }
 
-namespace pad {
-class ICeWall;
-}
+// namespace pad {
+// class ICeWall;
+// }
 
 namespace sta {
 class dbSta;
@@ -173,25 +173,25 @@ class Design
   std::uint64_t getNetRoutedLength(odb::dbNet* net);
 
   // Services
-  ifp::InitFloorplan* getFloorplan();
+  // ifp::InitFloorplan* getFloorplan();
   ant::AntennaChecker* getAntennaChecker();
   grt::GlobalRouter* getGlobalRouter();
-  gpl::Replace* getReplace();
+  // gpl::Replace* getReplace();
   dpl::Opendp* getOpendp();
-  mpl::MacroPlacer* getMacroPlacer();
-  ppl::IOPlacer* getIOPlacer();
-  tap::Tapcell* getTapcell();
-  cts::TritonCTS* getTritonCts();
+  // mpl::MacroPlacer* getMacroPlacer();
+  // ppl::IOPlacer* getIOPlacer();
+  // tap::Tapcell* getTapcell();
+  // cts::TritonCTS* getTritonCts();
   drt::TritonRoute* getTritonRoute();
   dpo::Optdp* getOptdp();
-  fin::Finale* getFinale();
-  par::PartitionMgr* getPartitionMgr();
+  // fin::Finale* getFinale();
+  // par::PartitionMgr* getPartitionMgr();
   rcx::Ext* getOpenRCX();
-  rmp::Restructure* getRestructure();
+  // rmp::Restructure* getRestructure();
   stt::SteinerTreeBuilder* getSteinerTreeBuilder();
-  psm::PDNSim* getPDNSim();
-  pdn::PdnGen* getPdnGen();
-  pad::ICeWall* getICeWall();
+  // psm::PDNSim* getPDNSim();
+  // pdn::PdnGen* getPdnGen();
+  // pad::ICeWall* getICeWall();
 
   // This returns a database that is not the one associated with
   // the rest of the application.  It is usable as a standalone

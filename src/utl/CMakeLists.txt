@@ -139,4 +139,6 @@ if(ENABLE_TESTS)
   )
 endif()
 
-add_subdirectory(test)
+if (ENABLE_TESTS)
+    add_subdirectory(test)
+endif()

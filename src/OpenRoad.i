@@ -119,40 +119,40 @@ getResizer()
   return openroad->getResizer();
 }
 
-rmp::Restructure *
-getRestructure()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getRestructure();
-}
+// rmp::Restructure *
+// getRestructure()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getRestructure();
+// }
 
-cts::TritonCTS *
-getTritonCts()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getTritonCts();
-}
+// cts::TritonCTS *
+// getTritonCts()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getTritonCts();
+// }
 
-mpl::MacroPlacer *
-getMacroPlacer()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getMacroPlacer();
-}
+// mpl::MacroPlacer *
+// getMacroPlacer()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getMacroPlacer();
+// }
 
-mpl2::MacroPlacer2 *
-getMacroPlacer2()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getMacroPlacer2();
-}
+// mpl2::MacroPlacer2 *
+// getMacroPlacer2()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getMacroPlacer2();
+// }
 
-gpl::Replace*
-getReplace()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getReplace();
-}
+// gpl::Replace*
+// getReplace()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getReplace();
+// }
 
 rcx::Ext *
 getOpenRCX()
@@ -168,12 +168,12 @@ getTritonRoute()
   return openroad->getTritonRoute();
 }
 
-psm::PDNSim*
-getPDNSim()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getPDNSim();
-}
+// psm::PDNSim*
+// getPDNSim()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getPDNSim();
+// }
 
 grt::GlobalRouter*
 getGlobalRouter()
@@ -182,40 +182,40 @@ getGlobalRouter()
   return openroad->getGlobalRouter();
 }
 
-tap::Tapcell* 
-getTapcell()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getTapcell();
-}
+// tap::Tapcell* 
+// getTapcell()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getTapcell();
+// }
 
-ppl::IOPlacer*
-getIOPlacer()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getIOPlacer();
-}
+// ppl::IOPlacer*
+// getIOPlacer()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getIOPlacer();
+// }
 
-par::PartitionMgr*
-getPartitionMgr()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getPartitionMgr();
-}
+// par::PartitionMgr*
+// getPartitionMgr()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getPartitionMgr();
+// }
 
-pdn::PdnGen*
-getPdnGen()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getPdnGen();
-}
+// pdn::PdnGen*
+// getPdnGen()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getPdnGen();
+// }
 
-pad::ICeWall*
-getICeWall()
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->getICeWall();
-}
+// pad::ICeWall*
+// getICeWall()
+// {
+//   OpenRoad *openroad = getOpenRoad();
+//   return openroad->getICeWall();
+// }
 
 stt::SteinerTreeBuilder*
 getSteinerTreeBuilder()

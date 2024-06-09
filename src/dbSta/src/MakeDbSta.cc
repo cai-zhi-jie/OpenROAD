@@ -8,11 +8,11 @@
 
 #include <tcl.h>
 
-#include "PathRenderer.h"
+// #include "PathRenderer.h"
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
-#include "gui/gui.h"
-#include "heatMap.h"
+// #include "gui/gui.h"
+// #include "heatMap.h"
 #include "odb/db.h"
 #include "ord/OpenRoad.hh"
 #include "sta/StaMain.hh"
@@ -44,11 +44,11 @@ void initDbSta(OpenRoad* openroad)
   sta->initVars(openroad->tclInterp(), openroad->getDb(), logger);
   sta::Sta::setSta(sta);
 
-  if (gui::Gui::enabled()) {
-    sta->setPathRenderer(std::make_unique<sta::PathRenderer>(sta));
-  }
-  sta->setPowerDensityDataSource(
-      std::make_unique<sta::PowerDensityDataSource>(sta, logger));
+  // if (gui::Gui::enabled()) {
+  //   sta->setPathRenderer(std::make_unique<sta::PathRenderer>(sta));
+  // }
+  // sta->setPowerDensityDataSource(
+  //     std::make_unique<sta::PowerDensityDataSource>(sta, logger));
 
   Tcl_Interp* tcl_interp = openroad->tclInterp();
 

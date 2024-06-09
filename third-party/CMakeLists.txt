@@ -55,6 +55,6 @@ if (NOT USE_SYSTEM_ABC)
 add_compile_options(
   $<$<CXX_COMPILER_ID:AppleClang>:-g>
 )
-  add_subdirectory(abc)
+  # add_subdirectory(abc)
 
 endif()

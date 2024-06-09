@@ -46,22 +46,22 @@
 #endif
 
 #include "ant/MakeAntennaChecker.hh"
-#include "cts/MakeTritoncts.h"
+// #include "cts/MakeTritoncts.h"
 #include "db_sta/MakeDbSta.hh"
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbReadVerilog.hh"
 #include "db_sta/dbSta.hh"
-#include "dft/MakeDft.hh"
+// #include "dft/MakeDft.hh"
 #include "dpl/MakeOpendp.h"
 #include "dpo/MakeOptdp.h"
 #include "dst/MakeDistributed.h"
-#include "fin/MakeFinale.h"
-#include "gpl/MakeReplace.h"
+// #include "fin/MakeFinale.h"
+// #include "gpl/MakeReplace.h"
 #include "grt/MakeGlobalRouter.h"
 #include "gui/MakeGui.h"
-#include "ifp//MakeInitFloorplan.hh"
-#include "mpl/MakeMacroPlacer.h"
-#include "mpl2/MakeMacroPlacer.h"
+// #include "ifp//MakeInitFloorplan.hh"
+// #include "mpl/MakeMacroPlacer.h"
+// #include "mpl2/MakeMacroPlacer.h"
 #include "odb/cdl.h"
 #include "odb/db.h"
 #include "odb/defin.h"
@@ -69,18 +69,18 @@
 #include "odb/lefin.h"
 #include "odb/lefout.h"
 #include "ord/InitOpenRoad.hh"
-#include "pad/MakeICeWall.h"
-#include "par/MakePartitionMgr.h"
-#include "pdn/MakePdnGen.hh"
-#include "ppl/MakeIoplacer.h"
-#include "psm/MakePDNSim.hh"
+// #include "pad/MakeICeWall.h"
+// #include "par/MakePartitionMgr.h"
+// #include "pdn/MakePdnGen.hh"
+// #include "ppl/MakeIoplacer.h"
+// #include "psm/MakePDNSim.hh"
 #include "rcx/MakeOpenRCX.h"
-#include "rmp/MakeRestructure.h"
+// #include "rmp/MakeRestructure.h"
 #include "rsz/MakeResizer.hh"
 #include "sta/StaMain.hh"
 #include "sta/VerilogWriter.hh"
 #include "stt/MakeSteinerTreeBuilder.h"
-#include "tap/MakeTapcell.h"
+// #include "tap/MakeTapcell.h"
 #include "triton_route/MakeTritonRoute.h"
 #include "utl/Logger.h"
 #include "utl/MakeLogger.h"
@@ -126,28 +126,28 @@ OpenRoad::~OpenRoad()
   // Temporarily removed until a crash can be resolved
   // deleteDbSta(sta_);
   // sta::deleteAllMemory();
-  deleteIoplacer(ioPlacer_);
+  // deleteIoplacer(ioPlacer_);
   deleteResizer(resizer_);
   deleteOpendp(opendp_);
   deleteOptdp(optdp_);
   deleteGlobalRouter(global_router_);
-  deleteRestructure(restructure_);
-  deleteTritonCts(tritonCts_);
-  deleteTapcell(tapcell_);
-  deleteMacroPlacer(macro_placer_);
-  deleteMacroPlacer2(macro_placer2_);
+  // deleteRestructure(restructure_);
+  // deleteTritonCts(tritonCts_);
+  // deleteTapcell(tapcell_);
+  // deleteMacroPlacer(macro_placer_);
+  // deleteMacroPlacer2(macro_placer2_);
   deleteOpenRCX(extractor_);
   deleteTritonRoute(detailed_router_);
-  deleteReplace(replace_);
-  deleteFinale(finale_);
+  // deleteReplace(replace_);
+  // deleteFinale(finale_);
   deleteAntennaChecker(antenna_checker_);
   odb::dbDatabase::destroy(db_);
-  deletePartitionMgr(partitionMgr_);
-  deletePdnGen(pdngen_);
-  deleteICeWall(icewall_);
+  // deletePartitionMgr(partitionMgr_);
+  // deletePdnGen(pdngen_);
+  // deleteICeWall(icewall_);
   deleteDistributed(distributer_);
   deleteSteinerTreeBuilder(stt_builder_);
-  dft::deleteDft(dft_);
+  // dft::deleteDft(dft_);
   delete logger_;
 }
 
@@ -180,28 +180,28 @@ void OpenRoad::init(Tcl_Interp* tcl_interp)
   db_->setLogger(logger_);
   sta_ = makeDbSta();
   verilog_network_ = makeDbVerilogNetwork();
-  ioPlacer_ = makeIoplacer();
+  // ioPlacer_ = makeIoplacer();
   resizer_ = makeResizer();
   opendp_ = makeOpendp();
   optdp_ = makeOptdp();
-  finale_ = makeFinale();
+  // finale_ = makeFinale();
   global_router_ = makeGlobalRouter();
-  restructure_ = makeRestructure();
-  tritonCts_ = makeTritonCts();
-  tapcell_ = makeTapcell();
-  macro_placer_ = makeMacroPlacer();
-  macro_placer2_ = makeMacroPlacer2();
+  // restructure_ = makeRestructure();
+  // tritonCts_ = makeTritonCts();
+  // tapcell_ = makeTapcell();
+  // macro_placer_ = makeMacroPlacer();
+  // macro_placer2_ = makeMacroPlacer2();
   extractor_ = makeOpenRCX();
   detailed_router_ = makeTritonRoute();
-  replace_ = makeReplace();
-  pdnsim_ = makePDNSim();
+  // replace_ = makeReplace();
+  // pdnsim_ = makePDNSim();
   antenna_checker_ = makeAntennaChecker();
-  partitionMgr_ = makePartitionMgr();
-  pdngen_ = makePdnGen();
-  icewall_ = makeICeWall();
+  // partitionMgr_ = makePartitionMgr();
+  // pdngen_ = makePdnGen();
+  // icewall_ = makeICeWall();
   distributer_ = makeDistributed();
   stt_builder_ = makeSteinerTreeBuilder();
-  dft_ = dft::makeDft();
+  // dft_ = dft::makeDft();
 
   // Init components.
   Openroad_swig_Init(tcl_interp);
@@ -213,31 +213,31 @@ void OpenRoad::init(Tcl_Interp* tcl_interp)
   Odbtcl_Init(tcl_interp);
   Upf_Init(tcl_interp);
   evalTclInit(tcl_interp, sta::upf_tcl_inits);
-  initInitFloorplan(this);
+  // initInitFloorplan(this);
   initDbSta(this);
   initResizer(this);
   initDbVerilogNetwork(this);
-  initIoplacer(this);
-  initReplace(this);
+  // initIoplacer(this);
+  // initReplace(this);
   initOpendp(this);
   initOptdp(this);
-  initFinale(this);
+  // initFinale(this);
   initGlobalRouter(this);
-  initTritonCts(this);
-  initTapcell(this);
-  initMacroPlacer(this);
-  initMacroPlacer2(this);
+  // initTritonCts(this);
+  // initTapcell(this);
+  // initMacroPlacer(this);
+  // initMacroPlacer2(this);
   initOpenRCX(this);
-  initICeWall(this);
-  initRestructure(this);
+  // initICeWall(this);
+  // initRestructure(this);
   initTritonRoute(this);
-  initPDNSim(this);
+  // initPDNSim(this);
   initAntennaChecker(this);
-  initPartitionMgr(this);
-  initPdnGen(this);
+  // initPartitionMgr(this);
+  // initPdnGen(this);
   initDistributed(this);
   initSteinerTreeBuilder(this);
-  dft::initDft(this);
+  // dft::initDft(this);
 
   // Import exported commands to global namespace.
   Tcl_Eval(tcl_interp, "sta::define_sta_cmds");

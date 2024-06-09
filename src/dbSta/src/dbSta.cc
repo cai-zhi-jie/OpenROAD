@@ -213,11 +213,11 @@ void dbSta::setPathRenderer(std::unique_ptr<AbstractPathRenderer> path_renderer)
   path_renderer_ = std::move(path_renderer);
 }
 
-void dbSta::setPowerDensityDataSource(
-    std::unique_ptr<AbstractPowerDensityDataSource> power_density_data_source)
-{
-  power_density_data_source_ = std::move(power_density_data_source);
-}
+// void dbSta::setPowerDensityDataSource(
+//     std::unique_ptr<AbstractPowerDensityDataSource> power_density_data_source)
+// {
+//   power_density_data_source_ = std::move(power_density_data_source);
+// }
 
 std::unique_ptr<dbSta> dbSta::makeBlockSta(odb::dbBlock* block)
 {

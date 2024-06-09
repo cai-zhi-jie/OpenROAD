@@ -41,7 +41,7 @@
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
 #include "grt/GlobalRouter.h"
-#include "ifp/InitFloorplan.hh"
+// #include "ifp/InitFloorplan.hh"
 #include "odb/db.h"
 #include "ord/OpenRoad.hh"
 #include "ord/Tech.h"
@@ -119,15 +119,15 @@ void Design::writeDef(const std::string& file_name)
   app->writeDef(file_name.c_str(), "5.8");
 }
 
-ifp::InitFloorplan* Design::getFloorplan()
-{
-  auto app = OpenRoad::openRoad();
-  auto block = getBlock();
-  if (!block) {
-    getLogger()->error(utl::ORD, 37, "No block loaded.");
-  }
-  return new ifp::InitFloorplan(block, app->getLogger(), app->getDbNetwork());
-}
+// ifp::InitFloorplan* Design::getFloorplan()
+// {
+//   auto app = OpenRoad::openRoad();
+//   auto block = getBlock();
+//   if (!block) {
+//     getLogger()->error(utl::ORD, 37, "No block loaded.");
+//   }
+//   return new ifp::InitFloorplan(block, app->getLogger(), app->getDbNetwork());
+// }
 
 utl::Logger* Design::getLogger()
 {
@@ -251,11 +251,11 @@ grt::GlobalRouter* Design::getGlobalRouter()
   return app->getGlobalRouter();
 }
 
-gpl::Replace* Design::getReplace()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getReplace();
-}
+// gpl::Replace* Design::getReplace()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getReplace();
+// }
 
 dpl::Opendp* Design::getOpendp()
 {
@@ -263,29 +263,29 @@ dpl::Opendp* Design::getOpendp()
   return app->getOpendp();
 }
 
-mpl::MacroPlacer* Design::getMacroPlacer()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getMacroPlacer();
-}
+// mpl::MacroPlacer* Design::getMacroPlacer()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getMacroPlacer();
+// }
 
-ppl::IOPlacer* Design::getIOPlacer()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getIOPlacer();
-}
+// ppl::IOPlacer* Design::getIOPlacer()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getIOPlacer();
+// }
 
-tap::Tapcell* Design::getTapcell()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getTapcell();
-}
+// tap::Tapcell* Design::getTapcell()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getTapcell();
+// }
 
-cts::TritonCTS* Design::getTritonCts()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getTritonCts();
-}
+// cts::TritonCTS* Design::getTritonCts()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getTritonCts();
+// }
 
 drt::TritonRoute* Design::getTritonRoute()
 {
@@ -299,17 +299,17 @@ dpo::Optdp* Design::getOptdp()
   return app->getOptdp();
 }
 
-fin::Finale* Design::getFinale()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getFinale();
-}
+// fin::Finale* Design::getFinale()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getFinale();
+// }
 
-par::PartitionMgr* Design::getPartitionMgr()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getPartitionMgr();
-}
+// par::PartitionMgr* Design::getPartitionMgr()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getPartitionMgr();
+// }
 
 rcx::Ext* Design::getOpenRCX()
 {
@@ -317,11 +317,11 @@ rcx::Ext* Design::getOpenRCX()
   return app->getOpenRCX();
 }
 
-rmp::Restructure* Design::getRestructure()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getRestructure();
-}
+// rmp::Restructure* Design::getRestructure()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getRestructure();
+// }
 
 stt::SteinerTreeBuilder* Design::getSteinerTreeBuilder()
 {
@@ -329,23 +329,23 @@ stt::SteinerTreeBuilder* Design::getSteinerTreeBuilder()
   return app->getSteinerTreeBuilder();
 }
 
-psm::PDNSim* Design::getPDNSim()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getPDNSim();
-}
+// psm::PDNSim* Design::getPDNSim()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getPDNSim();
+// }
 
-pdn::PdnGen* Design::getPdnGen()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getPdnGen();
-}
+// pdn::PdnGen* Design::getPdnGen()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getPdnGen();
+// }
 
-pad::ICeWall* Design::getICeWall()
-{
-  auto app = OpenRoad::openRoad();
-  return app->getICeWall();
-}
+// pad::ICeWall* Design::getICeWall()
+// {
+//   auto app = OpenRoad::openRoad();
+//   return app->getICeWall();
+// }
 
 /* static */
 odb::dbDatabase* Design::createDetachedDb()

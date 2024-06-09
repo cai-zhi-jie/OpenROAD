@@ -81,26 +81,27 @@ using std::string;
 #ifdef ENABLE_PYTHON3
 
 #define FOREACH_TOOL_WITHOUT_OPENROAD(X) \
-  X(ifp)                                 \
   X(utl)                                 \
   X(ant)                                 \
   X(grt)                                 \
-  X(gpl)                                 \
-  X(dpl)                                 \
-  X(mpl)                                 \
-  X(ppl)                                 \
-  X(tap)                                 \
-  X(cts)                                 \
   X(drt)                                 \
+  X(dpl)                                 \
   X(dpo)                                 \
-  X(fin)                                 \
-  X(par)                                 \
   X(rcx)                                 \
-  X(rmp)                                 \
   X(stt)                                 \
-  X(psm)                                 \
-  X(pdn)                                 \
   X(odb)
+  
+  // X(rmp)                                 \
+  // X(psm)                                 \
+  // X(pdn)                                 \
+  // X(ifp)                                 \
+  // X(fin)                                 \
+  // X(par)                                 \
+  // X(gpl)                                 \
+  // X(mpl)                                 \
+  // X(ppl)                                 \
+  // X(tap)                                 \
+  // X(cts)                                 \
 
 #define FOREACH_TOOL(X)            \
   FOREACH_TOOL_WITHOUT_OPENROAD(X) \

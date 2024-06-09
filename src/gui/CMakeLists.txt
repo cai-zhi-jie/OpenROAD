@@ -115,4 +115,6 @@ target_include_directories(gui
     ${DBSTA_HOME}/include
 )
 
-add_subdirectory(test)
+if (ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
