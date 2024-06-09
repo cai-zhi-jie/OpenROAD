@@ -89,7 +89,7 @@ function(messages)
   add_custom_command(
     TARGET ${ARG_TARGET}
     POST_BUILD
-    COMMAND ${CMAKE_SOURCE_DIR}/etc/find_messages.py
+    COMMAND ${OPENROAD_HOME}/etc/find_messages.py
         ${local}
         > ${OUTPUT_DIR}/messages.txt
     WORKING_DIRECTORY ${SOURCE_DIR}
