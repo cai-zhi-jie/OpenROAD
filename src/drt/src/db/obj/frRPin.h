@@ -26,15 +26,14 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_RPIN_H_
-#define _FR_RPIN_H_
+#pragma once
 
 #include "db/infra/frBox.h"
 #include "db/obj/frBlockObject.h"
 #include "frBaseTypes.h"
 // #include "db/obj/frAccess.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class frAccessPoint;
 // serve the same purpose as drPin and grPin, but on fr level
@@ -42,12 +41,10 @@ class frRPin : public frBlockObject
 {
  public:
   // constructors
-  frRPin() : frBlockObject(), term(nullptr), accessPoint(nullptr), net(nullptr)
-  {
-  }
+  frRPin() = default;
   // setters
   void setFrTerm(frBlockObject* in) { term = in; }
-  void setAccessPoint(frAccessPoint*& in) { accessPoint = std::move(in); }
+  void setAccessPoint(frAccessPoint* in) { accessPoint = in; }
   void addToNet(frNet* in) { net = in; }
   // getters
   bool hasFrTerm() const { return (term); }
@@ -56,28 +53,15 @@ class frRPin : public frBlockObject
   frNet* getNet() const { return net; }
 
   // utility
-  void getBBox(Rect& in);
+  Rect getBBox();
   frLayerNum getLayerNum();
 
   // others
   frBlockObjectEnum typeId() const override { return frcRPin; }
 
  protected:
-  frBlockObject* term;         // either frTerm or frInstTerm
-  frAccessPoint* accessPoint;  // pref AP for frTerm and frInstTerm
-  frNet* net;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & term;
-    (ar) & accessPoint;
-    (ar) & net;
-  }
-
-  friend class boost::serialization::access;
+  frBlockObject* term{nullptr};         // either frBTerm or frInstTerm
+  frAccessPoint* accessPoint{nullptr};  // pref AP for frBTerm and frInstTerm
+  frNet* net{nullptr};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

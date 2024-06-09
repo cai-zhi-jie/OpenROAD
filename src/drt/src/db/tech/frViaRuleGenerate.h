@@ -26,30 +26,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_VIARULEGEN_H_
-#define _FR_VIARULEGEN_H_
+#pragma once
 
 #include <memory>
 
 #include "db/infra/frBox.h"
 
-namespace fr {
+namespace drt {
 class frViaRuleGenerate
 {
  public:
   // constructors
-  frViaRuleGenerate(const frString& nameIn)
-      : name(nameIn),
-        isDefault(false),
-        botEnc(),
-        cutRect(),
-        cutSpacing(),
-        topEnc(),
-        botLayerNum(0),
-        cutLayerNum(0),
-        topLayerNum(0)
-  {
-  }
+  frViaRuleGenerate(const frString& nameIn) : name(nameIn) {}
   // getters
   const frString& getName() const { return name; }
   bool getDefault() const { return isDefault; }
@@ -72,33 +60,13 @@ class frViaRuleGenerate
 
  private:
   frString name;
-  bool isDefault;
+  bool isDefault{false};
   Point botEnc;
   Rect cutRect;
   Point cutSpacing;
   Point topEnc;
-  frLayerNum botLayerNum;
-  frLayerNum cutLayerNum;
-  frLayerNum topLayerNum;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & name;
-    (ar) & isDefault;
-    (ar) & botEnc;
-    (ar) & cutRect;
-    (ar) & cutSpacing;
-    (ar) & topEnc;
-    (ar) & botLayerNum;
-    (ar) & cutLayerNum;
-    (ar) & topLayerNum;
-  }
-
-  frViaRuleGenerate() = default; // for serialization
-
-  friend class boost::serialization::access;
+  frLayerNum botLayerNum{0};
+  frLayerNum cutLayerNum{0};
+  frLayerNum topLayerNum{0};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

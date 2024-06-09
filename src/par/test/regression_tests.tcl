@@ -1,6 +1,6 @@
 record_tests {
-  hypergraph
-  graph_star
-  graph_clique
-  graph_hybrid
+  read_part
+  partition_gcd
+  #par_man_tcl_check
+  #par_readme_msgs_check
 }

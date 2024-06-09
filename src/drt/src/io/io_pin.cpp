@@ -28,101 +28,98 @@
 
 #include "io.h"
 
-using namespace std;
-using namespace fr;
+namespace drt {
 
 void io::Parser::instAnalysis()
 {
   if (VERBOSE > 0) {
-    logger->info(DRT, 162, "Library cell analysis.");
+    logger_->info(DRT, 162, "Library cell analysis.");
   }
-  trackOffsetMap.clear();
-  prefTrackPatterns.clear();
-  for (auto& trackPattern : design->getTopBlock()->getTrackPatterns()) {
+  trackOffsetMap_.clear();
+  prefTrackPatterns_.clear();
+  for (auto& trackPattern : design_->getTopBlock()->getTrackPatterns()) {
     auto isVerticalTrack
         = trackPattern->isHorizontal();  // yes = vertical track
-    if (design->getTech()->getLayer(trackPattern->getLayerNum())->getDir()
+    if (design_->getTech()->getLayer(trackPattern->getLayerNum())->getDir()
         == dbTechLayerDir::HORIZONTAL) {
       if (!isVerticalTrack) {
-        prefTrackPatterns.push_back(trackPattern);
+        prefTrackPatterns_.push_back(trackPattern);
       }
     } else {
       if (isVerticalTrack) {
-        prefTrackPatterns.push_back(trackPattern);
+        prefTrackPatterns_.push_back(trackPattern);
       }
     }
   }
 
-  int numLayers = design->getTech()->getLayers().size();
-  map<frBlock*, tuple<frLayerNum, frLayerNum>, frBlockObjectComp>
-      refBlockPinLayerRange;
-  for (auto& uRefBlock : design->getRefBlocks()) {
-    auto refBlock = uRefBlock.get();
+  int numLayers = design_->getTech()->getLayers().size();
+  std::map<frMaster*, std::tuple<frLayerNum, frLayerNum>, frBlockObjectComp>
+      masterPinLayerRange;
+  for (auto& uMaster : design_->getMasters()) {
+    auto master = uMaster.get();
     frLayerNum minLayerNum = numLayers;
     frLayerNum maxLayerNum = 0;
-    for (auto& uTerm : refBlock->getTerms()) {
+    for (auto& uTerm : master->getTerms()) {
       for (auto& uPin : uTerm->getPins()) {
         for (auto& uPinFig : uPin->getFigs()) {
           auto pinFig = uPinFig.get();
           if (pinFig->typeId() == frcRect) {
             auto lNum = static_cast<frRect*>(pinFig)->getLayerNum();
-            minLayerNum = min(minLayerNum, lNum);
-            maxLayerNum = max(maxLayerNum, lNum);
+            minLayerNum = std::min(minLayerNum, lNum);
+            maxLayerNum = std::max(maxLayerNum, lNum);
           } else {
-            logger->warn(DRT, 248, "instAnalysis unsupported pinFig.");
+            logger_->warn(DRT, 248, "instAnalysis unsupported pinFig.");
           }
         }
       }
     }
-    maxLayerNum = min(maxLayerNum + 2, numLayers);
-    refBlockPinLayerRange[refBlock] = make_tuple(minLayerNum, maxLayerNum);
+    maxLayerNum = std::min(maxLayerNum + 2, numLayers);
+    masterPinLayerRange[master] = std::make_tuple(minLayerNum, maxLayerNum);
   }
-  // cout <<"  refBlock pin layer range done" <<endl;
+  // std::cout <<"  master pin layer range done" <<std::endl;
 
   if (VERBOSE > 0) {
-    logger->info(DRT, 163, "Instance analysis.");
+    logger_->info(DRT, 163, "Instance analysis.");
   }
 
-  vector<frCoord> offset;
+  std::vector<frCoord> offset;
   int cnt = 0;
-  for (auto& inst : design->getTopBlock()->getInsts()) {
-    Point origin;
-    inst->getOrigin(origin);
+  for (auto& inst : design_->getTopBlock()->getInsts()) {
+    Point origin = inst->getOrigin();
     auto orient = inst->getOrient();
-    auto [minLayerNum, maxLayerNum]
-        = refBlockPinLayerRange[inst->getRefBlock()];
+    auto [minLayerNum, maxLayerNum] = masterPinLayerRange[inst->getMaster()];
     offset.clear();
-    for (auto& tp : prefTrackPatterns) {
+    for (auto& tp : prefTrackPatterns_) {
       if (tp->getLayerNum() >= minLayerNum
           && tp->getLayerNum() <= maxLayerNum) {
         // vertical track
         if (tp->isHorizontal()) {
           offset.push_back(origin.x() % tp->getTrackSpacing());
-          // cout <<"inst/offset/layer " <<inst->getName() <<" " <<origin.y() %
-          // tp->getTrackSpacing()
+          // std::cout <<"inst/offset/layer " <<inst->getName() <<" "
+          // <<origin.y() % tp->getTrackSpacing()
           //      <<" "
           //      <<design->getTech()->getLayer(tp->getLayerNum())->getName()
-          //      <<endl;
+          //      <<std::endl;
         } else {
           offset.push_back(origin.y() % tp->getTrackSpacing());
-          // cout <<"inst/offset/layer " <<inst->getName() <<" " <<origin.x() %
-          // tp->getTrackSpacing()
+          // std::cout <<"inst/offset/layer " <<inst->getName() <<" "
+          // <<origin.x() % tp->getTrackSpacing()
           //      <<" "
           //      <<design->getTech()->getLayer(tp->getLayerNum())->getName()
-          //      <<endl;
+          //      <<std::endl;
         }
       }
     }
-    trackOffsetMap[inst->getRefBlock()][orient][offset].insert(inst.get());
+    trackOffsetMap_[inst->getMaster()][orient][offset].insert(inst.get());
     cnt++;
     if (VERBOSE > 0) {
-      if (cnt < 100000) {
-        if (cnt % 10000 == 0) {
-          logger->report("  Complete {} instances.", cnt);
+      if (cnt < 1000000) {
+        if (cnt % 100000 == 0) {
+          logger_->report("  Complete {} instances.", cnt);
         }
       } else {
-        if (cnt % 100000 == 0) {
-          logger->report("  Complete {} instances.", cnt);
+        if (cnt % 1000000 == 0) {
+          logger_->report("  Complete {} instances.", cnt);
         }
       }
     }
@@ -130,12 +127,14 @@ void io::Parser::instAnalysis()
 
   cnt = 0;
   frString orientName;
-  for (auto& [refBlock, orientMap] : trackOffsetMap) {
+  for (auto& [master, orientMap] : trackOffsetMap_) {
     for (auto& [orient, offsetMap] : orientMap) {
       cnt += offsetMap.size();
     }
   }
   if (VERBOSE > 0) {
-    logger->info(DRT, 164, "Number of unique instances = {}.", cnt);
+    logger_->info(DRT, 164, "Number of unique instances = {}.", cnt);
   }
 }
+
+}  // namespace drt

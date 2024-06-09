@@ -26,34 +26,25 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _TA_PIN_H_
-#define _TA_PIN_H_
+#pragma once
 
 #include "db/taObj/taBlockObject.h"
 #include "db/taObj/taShape.h"
 #include "db/taObj/taVia.h"
 
-namespace fr {
+namespace drt {
 class frGuide;
+
 class taPin : public taBlockObject
 {
  public:
   // constructors
-  taPin()
-      : taBlockObject(),
-        guide_(nullptr),
-        pinFigs_(),
-        wlen_helper_(0),
-        pin_(false),
-        wlen_helper2_(0),
-        cost_(0),
-        numAssigned_(0)
-  {
-  }
+  taPin() = default;
+
   // getters
-  int getWlenHelper() const { return wlen_helper_; }
-  bool hasWlenHelper2() const { return pin_; }
-  int getWlenHelper2() const { return wlen_helper2_; }
+  int getNextIrouteDir() const { return nextIrouteDir_; }
+  bool hasPinCoord() const { return hasPinCoord_; }
+  int getPinCoord() const { return pinCoord_; }
   frGuide* getGuide() const { return guide_; }
   const std::vector<std::unique_ptr<taPinFig>>& getFigs() const
   {
@@ -61,11 +52,11 @@ class taPin : public taBlockObject
   }
   frCost getCost() const { return cost_; }
   int getNumAssigned() const { return numAssigned_; }
-  void setWlenHelper(int in) { wlen_helper_ = in; }
-  void setWlenHelper2(frCoord in)
+  void setNextIrouteDir(int in) { nextIrouteDir_ = in; }
+  void setPinCoord(frCoord in)
   {
-    pin_ = true;
-    wlen_helper2_ = in;
+    hasPinCoord_ = true;
+    pinCoord_ = in;
   }
   void setGuide(frGuide* in) { guide_ = in; }
   void addPinFig(std::unique_ptr<taPinFig> in)
@@ -82,20 +73,20 @@ class taPin : public taBlockObject
   {
     if (this->cost_ != b.cost_) {
       return this->getCost() > b.getCost();
-    } else {
-      return this->getId() < b.getId();
     }
+    return this->getId() < b.getId();
   }
 
  protected:
-  frGuide* guide_;
+  frGuide* guide_{nullptr};
   std::vector<std::unique_ptr<taPinFig>> pinFigs_;
-  int wlen_helper_;  // for nbr global guides
-  bool pin_;
-  frCoord wlen_helper2_;  // for local guides and pin guides
-  frCost cost_;
-  int numAssigned_;
+  int nextIrouteDir_{0};  // for nbr global guides
+  bool hasPinCoord_{false};
+  frCoord pinCoord_{0};  // for local guides and pin guides
+  frCost cost_{0};
+  int numAssigned_{0};
 };
+
 struct taPinComp
 {
   bool operator()(const taPin* lhs, const taPin* rhs) const
@@ -103,5 +94,4 @@ struct taPinComp
     return *lhs < *rhs;
   }
 };
-}  // namespace fr
-#endif
+}  // namespace drt

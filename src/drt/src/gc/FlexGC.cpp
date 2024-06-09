@@ -29,20 +29,13 @@
 #include <iostream>
 
 #include "gc/FlexGC_impl.h"
-#include "serialization.h"
 
-using namespace std;
-using namespace fr;
+namespace drt {
 
 FlexGCWorker::FlexGCWorker(frTechObject* techIn,
                            Logger* logger,
                            FlexDRWorker* drWorkerIn)
     : impl_(std::make_unique<Impl>(techIn, logger, drWorkerIn, this))
-{
-}
-
-FlexGCWorker::FlexGCWorker()
-    : impl_(std::make_unique<Impl>(nullptr, nullptr, nullptr, this))
 {
 }
 
@@ -59,49 +52,29 @@ FlexGCWorker::Impl::Impl(frTechObject* techIn,
     : tech_(techIn),
       logger_(logger),
       drWorker_(drWorkerIn),
-      extBox_(),
-      drcBox_(),
-      owner2nets_(),
-      nets_(),
-      markers_(),
-      mapMarkers_(),
-      pwires_(),
       rq_(gcWorkerIn),
       printMarker_(false),
-      modifiedDRNets_(),
       targetNet_(nullptr),
       minLayerNum_(std::numeric_limits<frLayerNum>::min()),
       maxLayerNum_(std::numeric_limits<frLayerNum>::max()),
-      targetObj_(nullptr),
       ignoreDB_(false),
       ignoreMinArea_(false),
       ignoreLongSideEOL_(false),
+      ignoreCornerSpacing_(false),
       surgicalFixEnabled_(false)
 {
 }
 
 void FlexGCWorker::Impl::addMarker(std::unique_ptr<frMarker> in)
 {
-  Rect bbox;
-  in->getBBox(bbox);
+  Rect bbox = in->getBBox();
   auto layerNum = in->getLayerNum();
   auto con = in->getConstraint();
-  std::vector<frBlockObject*> srcs(2, nullptr);
-  int i = 0;
-  for (auto& src : in->getSrcs()) {
-    srcs.at(i) = src;
-    i++;
-  }
-  if (mapMarkers_.find(std::make_tuple(bbox, layerNum, con, srcs[0], srcs[1]))
+  if (mapMarkers_.find({bbox, layerNum, con, in->getSrcs()})
       != mapMarkers_.end()) {
     return;
   }
-  if (mapMarkers_.find(std::make_tuple(bbox, layerNum, con, srcs[1], srcs[0]))
-      != mapMarkers_.end()) {
-    return;
-  }
-  mapMarkers_[std::make_tuple(bbox, layerNum, con, srcs[0], srcs[1])]
-      = in.get();
+  mapMarkers_[{bbox, layerNum, con, in->getSrcs()}] = in.get();
   markers_.push_back(std::move(in));
 }
 
@@ -125,7 +98,8 @@ void FlexGCWorker::checkMinStep(gcPin* pin)
   impl_->checkMetalShape_minStep(pin);
 }
 
-void FlexGCWorker::updateGCWorker() {
+void FlexGCWorker::updateGCWorker()
+{
   impl_->updateGCWorker();
 }
 
@@ -164,17 +138,22 @@ const std::vector<std::unique_ptr<drPatchWire>>& FlexGCWorker::getPWires() const
   return impl_->pwires_;
 }
 
+void FlexGCWorker::clearPWires()
+{
+  impl_->pwires_.clear();
+}
+
 bool FlexGCWorker::setTargetNet(frBlockObject* in)
 {
   auto& owner2nets = impl_->owner2nets_;
   if (owner2nets.find(in) != owner2nets.end()) {
     impl_->targetNet_ = owner2nets[in];
     return true;
-  } else {
-    return false;
   }
+  return false;
 }
-gcNet* FlexGCWorker::getTargetNet() {
+gcNet* FlexGCWorker::getTargetNet()
+{
   return impl_->targetNet_;
 }
 void FlexGCWorker::setEnableSurgicalFix(bool in)
@@ -187,9 +166,14 @@ void FlexGCWorker::resetTargetNet()
   impl_->targetNet_ = nullptr;
 }
 
-void FlexGCWorker::setTargetObj(frBlockObject* in)
+void FlexGCWorker::addTargetObj(frBlockObject* in)
 {
-  impl_->targetObj_ = in;
+  impl_->targetObjs_.insert(in);
+}
+
+void FlexGCWorker::setTargetObjs(const std::set<frBlockObject*>& targetObjs)
+{
+  impl_->targetObjs_ = targetObjs;
 }
 
 void FlexGCWorker::setIgnoreDB()
@@ -202,6 +186,11 @@ void FlexGCWorker::setIgnoreMinArea()
   impl_->ignoreMinArea_ = true;
 }
 
+void FlexGCWorker::setIgnoreCornerSpacing()
+{
+  impl_->ignoreCornerSpacing_ = true;
+}
+
 void FlexGCWorker::setIgnoreLongSideEOL()
 {
   impl_->ignoreLongSideEOL_ = true;
@@ -212,44 +201,9 @@ std::vector<std::unique_ptr<gcNet>>& FlexGCWorker::getNets()
   return impl_->getNets();
 }
 
-gcNet* FlexGCWorker::getNet(frNet* net) {
+gcNet* FlexGCWorker::getNet(frNet* net)
+{
   return impl_->getNet(net);
 }
-template <class Archive>
-void FlexGCWorker::Impl::serialize(Archive& ar, const unsigned int version)
-{
-  (ar) & tech_;
-  (ar) & drWorker_;
-  (ar) & extBox_;
-  (ar) & drcBox_;
-  (ar) & owner2nets_;
-  (ar) & nets_;
-  (ar) & markers_;
-  (ar) & mapMarkers_;
-  (ar) & pwires_;
-  (ar) & rq_;
-  (ar) & printMarker_;
-  (ar) & modifiedDRNets_;
-  (ar) & targetNet_;
-  (ar) & minLayerNum_;
-  (ar) & maxLayerNum_;
-  (ar) & targetObj_;
-  (ar) & ignoreDB_;
-  (ar) & ignoreMinArea_;
-  (ar) & surgicalFixEnabled_;
-}
 
-template <class Archive>
-void FlexGCWorker::serialize(Archive& ar, const unsigned int version)
-{
-  (ar) & impl_;
-}
-
-// Explicit instantiations
-template void FlexGCWorker::serialize<InputArchive>(
-    InputArchive& ar,
-    const unsigned int file_version);
-
-template void FlexGCWorker::serialize<OutputArchive>(
-    OutputArchive& ar,
-    const unsigned int file_version);
+}  // namespace drt

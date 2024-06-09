@@ -36,8 +36,6 @@
 #include "dbInst.h"
 #include "dbModule.h"
 #include "dbTable.h"
-// User Code Begin Includes
-// User Code End Includes
 
 namespace odb {
 
@@ -66,10 +64,11 @@ void dbModuleInstItr::reverse(dbObject* parent)
 
   while (id != 0) {
     _dbInst* inst = _inst_tbl->getPtr(id);
-    uint n = inst->_module_next;
-    inst->_module_next = list;
+    uint n = inst->_module_prev;
+    inst->_module_prev = inst->_module_next;
+    inst->_module_next = n;
     list = id;
-    id = n;
+    id = inst->_module_prev;
   }
   module->_insts = list;
   // User Code End reverse
@@ -86,8 +85,9 @@ uint dbModuleInstItr::size(dbObject* parent)
   uint cnt = 0;
 
   for (id = dbModuleInstItr::begin(parent); id != dbModuleInstItr::end(parent);
-       id = dbModuleInstItr::next(id))
+       id = dbModuleInstItr::next(id)) {
     ++cnt;
+  }
 
   return cnt;
 }
@@ -117,7 +117,5 @@ dbObject* dbModuleInstItr::getObject(uint id, ...)
 {
   return _inst_tbl->getPtr(id);
 }
-// User Code Begin Methods
-// User Code End Methods
 }  // namespace odb
    // Generator Code End Cpp

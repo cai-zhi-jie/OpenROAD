@@ -30,324 +30,99 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#include "heatMap.h"
-#include "db_sta/dbNetwork.hh"
+#include "gui/heatMap.h"
 
-#include <QComboBox>
-#include <QHBoxLayout>
-#include <QListWidget>
-#include <QPushButton>
-#include <QVBoxLayout>
+#include <QApplication>
+#include <algorithm>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
 
-#include <QDebug>
+#include "heatMapSetup.h"
+#include "utl/Logger.h"
 
 namespace gui {
 
-HeatMapSetup::HeatMapSetup(HeatMapDataSource& source,
-                           const QString& title,
-                           bool use_dbu,
-                           int dbu,
-                           QWidget* parent) :
-    QDialog(parent),
-    source_(source),
-    use_dbu_(use_dbu),
-    dbu_(dbu),
-    log_scale_(new QCheckBox(this)),
-    show_numbers_(new QCheckBox(this)),
-    show_legend_(new QCheckBox(this)),
-    grid_x_size_(nullptr),
-    grid_y_size_(nullptr),
-    grid_x_size_dbu_(nullptr),
-    grid_y_size_dbu_(nullptr),
-    min_range_selector_(new QDoubleSpinBox(this)),
-    show_mins_(new QCheckBox(this)),
-    max_range_selector_(new QDoubleSpinBox(this)),
-    show_maxs_(new QCheckBox(this)),
-    alpha_selector_(new QSpinBox(this)),
-    rebuild_(new QPushButton("Rebuild data", this)),
-    close_(new QPushButton("Close", this))
-{
-  setWindowTitle(title);
-
-  QVBoxLayout* overall_layout = new QVBoxLayout;
-  QFormLayout* form = new QFormLayout;
-
-  source_.makeAdditionalSetupOptions(this, form, [this]() { source_.redraw(); });
-
-  form->addRow(tr("Log scale"), log_scale_);
-
-  form->addRow(tr("Show numbers"), show_numbers_);
-
-  form->addRow(tr("Show legend"), show_legend_);
-
-  QHBoxLayout* grid_layout = new QHBoxLayout;
-  if (!use_dbu_) {
-    grid_x_size_ = new QDoubleSpinBox(this);
-    grid_y_size_ = new QDoubleSpinBox(this);
-
-    const QString grid_suffix(" \u03BCm"); // micro meters
-    grid_x_size_->setRange(source_.getGridSizeMinimumValue(), source_.getGridSizeMaximumValue());
-    grid_x_size_->setSuffix(grid_suffix);
-    grid_y_size_->setRange(source_.getGridSizeMinimumValue(), source_.getGridSizeMaximumValue());
-    grid_y_size_->setSuffix(grid_suffix);
-    grid_layout->addWidget(new QLabel("X", this));
-    grid_layout->addWidget(grid_x_size_);
-    grid_layout->addWidget(new QLabel("Y", this));
-    grid_layout->addWidget(grid_y_size_);
-    if (!source_.canAdjustGrid()) {
-      grid_x_size_->setEnabled(false);
-      grid_y_size_->setEnabled(false);
-    }
-  } else {
-    grid_x_size_dbu_ = new QSpinBox(this);
-    grid_y_size_dbu_ = new QSpinBox(this);
-
-    grid_x_size_dbu_->setRange(source_.getGridSizeMinimumValue() * dbu_, source_.getGridSizeMaximumValue() * dbu_);
-    grid_y_size_dbu_->setRange(source_.getGridSizeMinimumValue() * dbu_, source_.getGridSizeMaximumValue() * dbu_);
-    grid_layout->addWidget(new QLabel("X", this));
-    grid_layout->addWidget(grid_x_size_dbu_);
-    grid_layout->addWidget(new QLabel("Y", this));
-    grid_layout->addWidget(grid_y_size_dbu_);
-    if (!source_.canAdjustGrid()) {
-      grid_x_size_dbu_->setEnabled(false);
-      grid_y_size_dbu_->setEnabled(false);
-    }
-  }
-  form->addRow(tr("Grid"), grid_layout);
-
-  min_range_selector_->setDecimals(3);
-  QHBoxLayout* min_grid = new QHBoxLayout;
-  min_grid->addWidget(min_range_selector_);
-  min_grid->addWidget(new QLabel("Show values below", this));
-  min_grid->addWidget(show_mins_);
-  form->addRow(tr("Minimum"), min_grid);
-
-  max_range_selector_->setDecimals(3);
-  QHBoxLayout* max_grid = new QHBoxLayout;
-  max_grid->addWidget(max_range_selector_);
-  max_grid->addWidget(new QLabel("Show values above", this));
-  max_grid->addWidget(show_maxs_);
-  form->addRow(tr("Maximum"), max_grid);
-
-  alpha_selector_->setRange(source_.getColorAlphaMinimum(), source_.getColorAlphaMaximum());
-  form->addRow(tr("Color alpha"), alpha_selector_);
-
-  overall_layout->addLayout(form);
-
-  QHBoxLayout* buttons = new QHBoxLayout;
-  buttons->addWidget(rebuild_);
-  buttons->addWidget(close_);
-
-  overall_layout->addLayout(buttons);
-
-  setLayout(overall_layout);
-
-  updateWidgets();
-
-  connect(log_scale_,
-          SIGNAL(stateChanged(int)),
-          this,
-          SLOT(updateScale(int)));
-
-  if (!use_dbu_) {
-    connect(grid_x_size_,
-            SIGNAL(valueChanged(double)),
-            this,
-            SLOT(updateGridSize()));
-    connect(grid_y_size_,
-            SIGNAL(valueChanged(double)),
-            this,
-            SLOT(updateGridSize()));
-  } else {
-    connect(grid_x_size_dbu_,
-            SIGNAL(valueChanged(int)),
-            this,
-            SLOT(updateGridSize()));
-    connect(grid_y_size_dbu_,
-            SIGNAL(valueChanged(int)),
-            this,
-            SLOT(updateGridSize()));
-  }
-
-  connect(show_numbers_,
-          SIGNAL(stateChanged(int)),
-          this,
-          SLOT(updateShowNumbers(int)));
-
-  connect(show_legend_,
-          SIGNAL(stateChanged(int)),
-          this,
-          SLOT(updateShowLegend(int)));
-
-  connect(min_range_selector_,
-          SIGNAL(valueChanged(double)),
-          this,
-          SLOT(updateRange()));
-  connect(max_range_selector_,
-          SIGNAL(valueChanged(double)),
-          this,
-          SLOT(updateRange()));
-  connect(show_mins_,
-          SIGNAL(stateChanged(int)),
-          this,
-          SLOT(updateShowMinRange(int)));
-  connect(show_maxs_,
-          SIGNAL(stateChanged(int)),
-          this,
-          SLOT(updateShowMaxRange(int)));
-
-  connect(alpha_selector_,
-          SIGNAL(valueChanged(int)),
-          this,
-          SLOT(updateAlpha(int)));
-
-  connect(this,
-          SIGNAL(changed()),
-          this,
-          SLOT(updateWidgets()));
-
-  connect(rebuild_,
-          SIGNAL(pressed()),
-          this,
-          SLOT(destroyMap()));
-
-  connect(close_,
-          SIGNAL(pressed()),
-          this,
-          SLOT(accept()));
-}
-
-void HeatMapSetup::updateWidgets()
-{
-  show_mins_->setCheckState(source_.getDrawBelowRangeMin() ? Qt::Checked : Qt::Unchecked);
-
-  min_range_selector_->blockSignals(true);
-  min_range_selector_->setRange(source_.convertPercentToValue(source_.getDisplayRangeMinimumValue()),
-                                source_.convertPercentToValue(source_.getDisplayRangeMaximumValue()));
-  min_range_selector_->setValue(source_.convertPercentToValue(source_.getDisplayRangeMin()));
-  min_range_selector_->blockSignals(false);
-  min_range_selector_->setSuffix(" " + QString::fromStdString(source_.getValueUnits()));
-  min_range_selector_->setSingleStep(source_.getDisplayRangeIncrement());
-
-  show_maxs_->setCheckState(source_.getDrawAboveRangeMax() ? Qt::Checked : Qt::Unchecked);
-
-  max_range_selector_->blockSignals(true);
-  max_range_selector_->setRange(source_.convertPercentToValue(source_.getDisplayRangeMinimumValue()),
-                                source_.convertPercentToValue(source_.getDisplayRangeMaximumValue()));
-  max_range_selector_->setValue(source_.convertPercentToValue(source_.getDisplayRangeMax()));
-  max_range_selector_->blockSignals(false);
-  max_range_selector_->setSuffix(" " + QString::fromStdString(source_.getValueUnits()));
-  max_range_selector_->setSingleStep(source_.getDisplayRangeIncrement());
-
-  if (!use_dbu_) {
-    grid_x_size_->setValue(source_.getGridXSize());
-    grid_y_size_->setValue(source_.getGridYSize());
-  } else {
-    grid_x_size_dbu_->setValue(source_.getGridXSize() * dbu_);
-    grid_y_size_dbu_->setValue(source_.getGridYSize() * dbu_);
-  }
-
-  alpha_selector_->setValue(source_.getColorAlpha());
-
-  log_scale_->setCheckState(source_.getLogScale() ? Qt::Checked : Qt::Unchecked);
-  show_numbers_->setCheckState(source_.getShowNumbers() ? Qt::Checked : Qt::Unchecked);
-  show_legend_->setCheckState(source_.getShowLegend() ? Qt::Checked : Qt::Unchecked);
-}
-
-void HeatMapSetup::destroyMap()
-{
-  source_.destroyMap();
-}
-
-void HeatMapSetup::updateScale(int option)
-{
-  source_.setLogScale(option == Qt::Checked);
-  emit changed();
-}
-
-void HeatMapSetup::updateShowNumbers(int option)
-{
-  source_.setShowNumbers(option == Qt::Checked);
-  emit changed();
-}
-
-void HeatMapSetup::updateShowLegend(int option)
-{
-  source_.setShowLegend(option == Qt::Checked);
-  emit changed();
-}
-
-void HeatMapSetup::updateShowMinRange(int option)
-{
-  source_.setDrawBelowRangeMin(option == Qt::Checked);
-  emit changed();
-}
-
-void HeatMapSetup::updateShowMaxRange(int option)
-{
-  source_.setDrawAboveRangeMax(option == Qt::Checked);
-  emit changed();
-}
-
-void HeatMapSetup::updateRange()
-{
-  source_.setDisplayRange(source_.convertValueToPercent(min_range_selector_->value()),
-                          source_.convertValueToPercent(max_range_selector_->value()));
-  emit changed();
-}
-
-void HeatMapSetup::updateGridSize()
-{
-  if (!use_dbu_) {
-    source_.setGridSizes(grid_x_size_->value(), grid_y_size_->value());
-  } else {
-    const double dbu = dbu_;
-    source_.setGridSizes(grid_x_size_dbu_->value() / dbu, grid_x_size_dbu_->value() / dbu);
-  }
-  emit changed();
-}
-
-void HeatMapSetup::updateAlpha(int alpha)
-{
-  source_.setColorAlpha(alpha);
-  emit changed();
-}
-
-///////////
-
-HeatMapDataSource::HeatMapDataSource(const std::string& name,
+HeatMapDataSource::HeatMapDataSource(utl::Logger* logger,
+                                     const std::string& name,
                                      const std::string& short_name,
-                                     const std::string& settings_group) :
-    name_(name),
-    short_name_(short_name),
-    settings_group_(settings_group),
-    destroy_map_(true),
-    use_dbu_(false),
-    populated_(false),
-    colors_correct_(false),
-    issue_redraw_(true),
-    block_(nullptr),
-    logger_(nullptr),
-    grid_x_size_(10.0),
-    grid_y_size_(10.0),
-    display_range_min_(getDisplayRangeMinimumValue()),
-    display_range_max_(getDisplayRangeMaximumValue()),
-    draw_below_min_display_range_(false),
-    draw_above_max_display_range_(true),
-    color_alpha_(150),
-    log_scale_(false),
-    show_numbers_(false),
-    show_legend_(false),
-    map_(),
-    renderer_(std::make_unique<HeatMapRenderer>(name_, *this)),
-    setup_(nullptr),
-    color_generator_(SpectrumGenerator(100.0))
+                                     const std::string& settings_group)
+    : name_(name),
+      short_name_(short_name),
+      settings_group_(settings_group),
+      destroy_map_(true),
+      use_dbu_(false),
+      populated_(false),
+      colors_correct_(false),
+      issue_redraw_(true),
+      block_(nullptr),
+      logger_(logger),
+      grid_x_size_(10.0),
+      grid_y_size_(10.0),
+      display_range_min_(0.0),
+      display_range_max_(100.0),
+      draw_below_min_display_range_(false),
+      draw_above_max_display_range_(true),
+      color_alpha_(150),
+      log_scale_(false),
+      reverse_log_(false),
+      show_numbers_(false),
+      show_legend_(false),
+      renderer_(std::make_unique<HeatMapRenderer>(*this)),
+      setup_(nullptr),
+      color_generator_(SpectrumGenerator(100.0))
 {
+  clearMap();
+
+  // ensure color map is initialized
+  updateMapColors();
 }
 
-void HeatMapDataSource::setLogger(utl::Logger* logger)
+HeatMapDataSource::~HeatMapDataSource()
 {
-  logger_ = logger;
+  Gui::get()->unregisterHeatMap(this);
+}
+
+void HeatMapDataSource::registerHeatMap()
+{
+  Gui::get()->registerHeatMap(this);
+}
+
+void HeatMapDataSource::dumpToFile(const std::string& file)
+{
+  ensureMap();
+
+  if (!isPopulated()) {
+    logger_->error(utl::GUI, 72, "\"{}\" is not populated with data.", name_);
+  }
+
+  std::ofstream csv(file);
+  if (!csv.is_open()) {
+    logger_->error(utl::GUI, 73, "Unable to open {}", file);
+  }
+
+  const double dbu_to_micron = block_->getDbUnitsPerMicron();
+
+  csv << "x0,y0,x1,y1,value" << std::endl;
+  for (const auto& map_col : map_) {
+    for (const auto& map_value : map_col) {
+      if (!map_value->has_value) {
+        continue;
+      }
+      const odb::Rect& box_rect = map_value->rect;
+      const double scaled_value = convertPercentToValue(map_value->value);
+
+      csv << std::defaultfloat << std::setprecision(4);
+      csv << box_rect.xMin() / dbu_to_micron << ",";
+      csv << box_rect.yMin() / dbu_to_micron << ",";
+      csv << box_rect.xMax() / dbu_to_micron << ",";
+      csv << box_rect.yMax() / dbu_to_micron << ",";
+      csv << std::scientific << std::setprecision(6);
+      csv << scaled_value << std::endl;
+    }
+  }
+
+  csv.close();
 }
 
 void HeatMapDataSource::redraw()
@@ -361,7 +136,8 @@ void HeatMapDataSource::redraw()
 
 void HeatMapDataSource::setColorAlpha(int alpha)
 {
-  color_alpha_ = boundValue<int>(alpha, getColorAlphaMinimum(), getColorAlphaMaximum());
+  color_alpha_
+      = boundValue<int>(alpha, getColorAlphaMinimum(), getColorAlphaMaximum());
   updateMapColors();
 
   redraw();
@@ -373,8 +149,10 @@ void HeatMapDataSource::setDisplayRange(double min, double max)
     std::swap(min, max);
   }
 
-  display_range_min_ = boundValue<double>(min, getDisplayRangeMinimumValue(), getDisplayRangeMaximumValue());
-  display_range_max_ = boundValue<double>(max, getDisplayRangeMinimumValue(), getDisplayRangeMaximumValue());
+  display_range_min_ = boundValue<double>(
+      min, getDisplayRangeMinimumValue(), getDisplayRangeMaximumValue());
+  display_range_max_ = boundValue<double>(
+      max, getDisplayRangeMinimumValue(), getDisplayRangeMaximumValue());
 
   updateMapColors();
 
@@ -399,11 +177,13 @@ void HeatMapDataSource::setGridSizes(double x, double y)
 {
   bool changed = false;
   if (grid_x_size_ != x) {
-    grid_x_size_ = boundValue<double>(x, getGridSizeMinimumValue(), getGridSizeMaximumValue());
+    grid_x_size_ = boundValue<double>(
+        x, getGridSizeMinimumValue(), getGridSizeMaximumValue());
     changed = true;
   }
   if (grid_y_size_ != y) {
-    grid_y_size_ = boundValue<double>(y, getGridSizeMinimumValue(), getGridSizeMaximumValue());
+    grid_y_size_ = boundValue<double>(
+        y, getGridSizeMinimumValue(), getGridSizeMaximumValue());
     changed = true;
   }
 
@@ -415,6 +195,14 @@ void HeatMapDataSource::setGridSizes(double x, double y)
 void HeatMapDataSource::setLogScale(bool scale)
 {
   log_scale_ = scale;
+  updateMapColors();
+
+  redraw();
+}
+
+void HeatMapDataSource::setReverseLogScale(bool reverse)
+{
+  reverse_log_ = reverse;
   updateMapColors();
 
   redraw();
@@ -434,24 +222,29 @@ void HeatMapDataSource::setShowLegend(bool legend)
   redraw();
 }
 
-const Painter::Color HeatMapDataSource::getColor(double value) const
+Painter::Color HeatMapDataSource::getColor(double value) const
 {
-  if (log_scale_) {
-    if (value <= 0.0) {
-      return color_generator_.getColor(0.0, color_alpha_);
-    }
-  }
-
-  return color_generator_.getColor(value, color_alpha_);
+  auto find_val
+      = std::find_if(color_lower_bounds_.begin(),
+                     color_lower_bounds_.end(),
+                     [value](const double other) { return other >= value; });
+  const double color_index
+      = std::distance(color_lower_bounds_.begin(), find_val);
+  return color_generator_.getColor(
+      100.0 * color_index / color_generator_.getColorCount(), color_alpha_);
 }
 
 void HeatMapDataSource::showSetup()
 {
   if (setup_ == nullptr) {
-    setup_ = new HeatMapSetup(*this, QString::fromStdString(name_), use_dbu_, block_->getDbUnitsPerMicron());
+    setup_ = new HeatMapSetup(*this,
+                              QString::fromStdString(name_),
+                              use_dbu_,
+                              block_->getDbUnitsPerMicron());
 
     QObject::connect(setup_, &QDialog::finished, &QObject::deleteLater);
-    QObject::connect(setup_, &QObject::destroyed, [this]() { setup_ = nullptr; });
+    QObject::connect(
+        setup_, &QObject::destroyed, [this]() { setup_ = nullptr; });
 
     setup_->show();
   } else {
@@ -459,7 +252,7 @@ void HeatMapDataSource::showSetup()
   }
 }
 
-const std::string HeatMapDataSource::formatValue(double value, bool legend) const
+std::string HeatMapDataSource::formatValue(double value, bool legend) const
 {
   QString text;
   text.setNum(value, 'f', 2);
@@ -469,16 +262,49 @@ const std::string HeatMapDataSource::formatValue(double value, bool legend) cons
   return text.toStdString();
 }
 
-const Renderer::Settings HeatMapDataSource::getSettings() const
+void HeatMapDataSource::addBooleanSetting(
+    const std::string& name,
+    const std::string& label,
+    const std::function<bool(void)>& getter,
+    const std::function<void(bool)>& setter)
 {
-  return {{"DisplayMin", display_range_min_},
-          {"DisplayMax", display_range_max_},
-          {"GridX", grid_x_size_},
-          {"GridY", grid_y_size_},
-          {"Alpha", color_alpha_},
-          {"LogScale", log_scale_},
-          {"ShowNumbers", show_numbers_},
-          {"ShowLegend", show_legend_}};
+  settings_.emplace_back(MapSettingBoolean{name, label, getter, setter});
+}
+
+void HeatMapDataSource::addMultipleChoiceSetting(
+    const std::string& name,
+    const std::string& label,
+    const std::function<std::vector<std::string>(void)>& choices,
+    const std::function<std::string(void)>& getter,
+    const std::function<void(std::string)>& setter)
+{
+  settings_.emplace_back(
+      MapSettingMultiChoice{name, label, choices, getter, setter});
+}
+
+Renderer::Settings HeatMapDataSource::getSettings() const
+{
+  Renderer::Settings settings{{"DisplayMin", display_range_min_},
+                              {"DisplayMax", display_range_max_},
+                              {"GridX", grid_x_size_},
+                              {"GridY", grid_y_size_},
+                              {"Alpha", color_alpha_},
+                              {"LogScale", log_scale_},
+                              {"ReverseLog", reverse_log_},
+                              {"ShowNumbers", show_numbers_},
+                              {"ShowLegend", show_legend_}};
+
+  for (const auto& setting : settings_) {
+    if (std::holds_alternative<MapSettingBoolean>(setting)) {
+      const auto& set = std::get<MapSettingBoolean>(setting);
+      settings[set.name] = set.getter();
+    } else if (std::holds_alternative<MapSettingMultiChoice>(setting)) {
+      const auto& set = std::get<MapSettingMultiChoice>(setting);
+      settings[set.name] = set.getter();
+    }
+  }
+
+  return settings;
 }
 
 void HeatMapDataSource::setSettings(const Renderer::Settings& settings)
@@ -489,8 +315,23 @@ void HeatMapDataSource::setSettings(const Renderer::Settings& settings)
   Renderer::setSetting<double>(settings, "GridY", grid_y_size_);
   Renderer::setSetting<int>(settings, "Alpha", color_alpha_);
   Renderer::setSetting<bool>(settings, "LogScale", log_scale_);
+  Renderer::setSetting<bool>(settings, "ReverseLog", reverse_log_);
   Renderer::setSetting<bool>(settings, "ShowNumbers", show_numbers_);
   Renderer::setSetting<bool>(settings, "ShowLegend", show_legend_);
+
+  for (const auto& setting : settings_) {
+    if (std::holds_alternative<MapSettingBoolean>(setting)) {
+      const auto& set = std::get<MapSettingBoolean>(setting);
+      bool temp_value = set.getter();
+      Renderer::setSetting<bool>(settings, set.name, temp_value);
+      set.setter(temp_value);
+    } else if (std::holds_alternative<MapSettingMultiChoice>(setting)) {
+      const auto& set = std::get<MapSettingMultiChoice>(setting);
+      std::string temp_value = set.getter();
+      Renderer::setSetting<std::string>(settings, set.name, temp_value);
+      set.setter(temp_value);
+    }
+  }
 
   // only reapply bounded value settings
   setDisplayRange(display_range_min_, display_range_max_);
@@ -498,22 +339,70 @@ void HeatMapDataSource::setSettings(const Renderer::Settings& settings)
   setColorAlpha(color_alpha_);
 }
 
+HeatMapDataSource::MapView HeatMapDataSource::getMapView(
+    const odb::Rect& bounds)
+{
+  const auto x_low_find
+      = std::lower_bound(map_x_grid_.begin(), map_x_grid_.end(), bounds.xMin());
+  const auto x_high_find
+      = std::upper_bound(x_low_find, map_x_grid_.end(), bounds.xMax());
+  const auto y_low_find
+      = std::lower_bound(map_y_grid_.begin(), map_y_grid_.end(), bounds.yMin());
+  const auto y_high_find
+      = std::upper_bound(y_low_find, map_y_grid_.end(), bounds.yMax());
+
+  const int shape_x = static_cast<int>(map_.shape()[0]);
+  const int shape_y = static_cast<int>(map_.shape()[1]);
+
+  const int x_low = std::max(
+      static_cast<int>(std::distance(map_x_grid_.begin(), x_low_find)) - 1, 0);
+  const int x_high = std::min(
+      static_cast<int>(std::distance(map_x_grid_.begin(), x_high_find)),
+      shape_x);
+  const int y_low = std::max(
+      static_cast<int>(std::distance(map_y_grid_.begin(), y_low_find)) - 1, 0);
+  const int y_high = std::min(
+      static_cast<int>(std::distance(map_y_grid_.begin(), y_high_find)),
+      shape_y);
+
+  return map_[boost::indices[Map::index_range(x_low, x_high)]
+                            [Map::index_range(y_low, y_high)]];
+}
+
 void HeatMapDataSource::addToMap(const odb::Rect& region, double value)
 {
-  Box query(Point(region.xMin(), region.yMin()), Point(region.xMax(), region.yMax()));
-  for (auto it = map_.qbegin(bgi::intersects(query)); it != map_.qend(); it++) {
-    auto* map_pt = it->second.get();
-    odb::Rect intersection;
-    map_pt->rect.intersection(region, intersection);
+  for (const auto& map_col : getMapView(region)) {
+    for (const auto& map_pt : map_col) {
+      odb::Rect intersection;
+      map_pt->rect.intersection(region, intersection);
 
-    const double intersect_area = intersection.area();
-    const double value_area = region.area();
-    const double region_area = map_pt->rect.area();
+      const double intersect_area = intersection.area();
+      const double value_area = region.area();
+      const double region_area = map_pt->rect.area();
 
-    combineMapData(map_pt->value, value, value_area, intersect_area, region_area);
+      combineMapData(map_pt->has_value,
+                     map_pt->value,
+                     value,
+                     value_area,
+                     intersect_area,
+                     region_area);
+      map_pt->has_value = true;
 
-    markColorsInvalid();
+      markColorsInvalid();
+    }
   }
+}
+
+odb::Rect HeatMapDataSource::getBounds() const
+{
+  return getBlock()->getDieArea();
+}
+
+void HeatMapDataSource::clearMap()
+{
+  map_.resize(boost::extents[1][1]);
+  map_[0][0] = nullptr;
+  populated_ = false;
 }
 
 void HeatMapDataSource::setupMap()
@@ -522,32 +411,83 @@ void HeatMapDataSource::setupMap()
     return;
   }
 
+  populateXYGrid();
+
+  const size_t x_grid_size = map_x_grid_.size() - 1;
+  const size_t y_grid_size = map_y_grid_.size() - 1;
+
+  debugPrint(logger_,
+             utl::GUI,
+             "HeatMap",
+             1,
+             "Generating {}x{} map",
+             x_grid_size,
+             y_grid_size);
+  map_.resize(boost::extents[x_grid_size][y_grid_size]);
+
+  const Painter::Color default_color = getColor(0);
+  for (size_t x = 0; x < x_grid_size; x++) {
+    const int xMin = map_x_grid_[x];
+    const int xMax = map_x_grid_[x + 1];
+
+    for (size_t y = 0; y < y_grid_size; y++) {
+      const int yMin = map_y_grid_[y];
+      const int yMax = map_y_grid_[y + 1];
+
+      auto map_pt = std::make_shared<MapColor>();
+      map_pt->rect = odb::Rect(xMin, yMin, xMax, yMax);
+      map_pt->has_value = false;
+      map_pt->value = 0.0;
+      map_pt->color = default_color;
+
+      map_[x][y] = std::move(map_pt);
+    }
+  }
+}
+
+void HeatMapDataSource::populateXYGrid()
+{
   const int dx = getGridXSize() * getBlock()->getDbUnitsPerMicron();
   const int dy = getGridYSize() * getBlock()->getDbUnitsPerMicron();
 
-  odb::Rect bounds;
-  getBlock()->getBBox()->getBox(bounds);
+  const odb::Rect bounds = getBounds();
 
   const int x_grid = std::ceil(bounds.dx() / static_cast<double>(dx));
   const int y_grid = std::ceil(bounds.dy() / static_cast<double>(dy));
 
+  std::vector<int> x_grid_set, y_grid_set;
   for (int x = 0; x < x_grid; x++) {
     const int xMin = bounds.xMin() + x * dx;
     const int xMax = std::min(xMin + dx, bounds.xMax());
-
-    for (int y = 0; y < y_grid; y++) {
-      const int yMin = bounds.yMin() + y * dy;
-      const int yMax = std::min(yMin + dy, bounds.yMax());
-
-      auto map_pt = std::make_shared<MapColor>();
-      map_pt->rect = odb::Rect(xMin, yMin, xMax, yMax);
-      map_pt->value = 0.0;
-      map_pt->color = getColor(0);
-
-      Box bbox(Point(xMin, yMin), Point(xMax, yMax));
-      map_.insert(std::make_pair(bbox, map_pt));
+    if (x == 0) {
+      x_grid_set.push_back(xMin);
     }
+    x_grid_set.push_back(xMax);
   }
+  for (int y = 0; y < y_grid; y++) {
+    const int yMin = bounds.yMin() + y * dy;
+    const int yMax = std::min(yMin + dy, bounds.yMax());
+    if (y == 0) {
+      y_grid_set.push_back(yMin);
+    }
+    y_grid_set.push_back(yMax);
+  }
+
+  setXYMapGrid(x_grid_set, y_grid_set);
+}
+
+void HeatMapDataSource::setXYMapGrid(const std::vector<int>& x_grid,
+                                     const std::vector<int>& y_grid)
+{
+  // ensure sorted and uniqueness
+  const std::set<int> x_grid_set(x_grid.begin(), x_grid.end());
+  const std::set<int> y_grid_set(y_grid.begin(), y_grid.end());
+
+  map_x_grid_.clear();
+  map_y_grid_.clear();
+
+  map_x_grid_.insert(map_x_grid_.end(), x_grid_set.begin(), x_grid_set.end());
+  map_y_grid_.insert(map_y_grid_.end(), y_grid_set.begin(), y_grid_set.end());
 }
 
 void HeatMapDataSource::destroyMap()
@@ -557,22 +497,52 @@ void HeatMapDataSource::destroyMap()
   redraw();
 }
 
+bool HeatMapDataSource::hasData() const
+{
+  if (!populated_) {
+    return false;
+  }
+
+  for (const auto& map_col : map_) {
+    for (const auto& map_pt : map_col) {
+      if (map_pt->has_value) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 void HeatMapDataSource::ensureMap()
 {
+  std::unique_lock<std::mutex> lock(ensure_mutex_);
+
   if (destroy_map_) {
-    map_.clear();
+    debugPrint(logger_, utl::GUI, "HeatMap", 1, "Destroying map");
+    clearMap();
     destroy_map_ = false;
   }
 
-  const bool build_map = map_.empty();
+  const bool build_map = map_[0][0] == nullptr;
   if (build_map) {
+    debugPrint(logger_, utl::GUI, "HeatMap", 1, "Setting up map");
     setupMap();
   }
 
   if (build_map || !isPopulated()) {
+    debugPrint(logger_, utl::GUI, "HeatMap", 1, "Populating map");
+
+    if (gui::Gui::enabled()) {
+      QApplication::setOverrideCursor(Qt::WaitCursor);
+    }
     populated_ = populateMap();
+    if (gui::Gui::enabled()) {
+      QApplication::restoreOverrideCursor();
+    }
 
     if (isPopulated()) {
+      debugPrint(logger_, utl::GUI, "HeatMap", 1, "Correcting map scale");
       correctMapScale(map_);
     }
 
@@ -584,7 +554,8 @@ void HeatMapDataSource::ensureMap()
     }
   }
 
-  if (!colors_correct_) {
+  if (!colors_correct_ && isPopulated()) {
+    debugPrint(logger_, utl::GUI, "HeatMap", 1, "Assigning map colors");
     assignMapColors();
   }
 }
@@ -608,7 +579,15 @@ void HeatMapDataSource::updateMapColors()
       if (i == color_generator_.getColorCount()) {
         start = display_range_min_;
       }
-      color_lower_bounds_[color_count - i] = start;
+      color_lower_bounds_[i] = start;
+    }
+
+    if (reverse_log_) {
+      for (auto& lower_bound : color_lower_bounds_) {
+        lower_bound = display_range_max_ - lower_bound + display_range_min_;
+      }
+    } else {
+      std::reverse(color_lower_bounds_.begin(), color_lower_bounds_.end());
     }
   } else {
     const double step = (display_range_max_ - display_range_min_) / color_count;
@@ -622,8 +601,10 @@ void HeatMapDataSource::updateMapColors()
 
 void HeatMapDataSource::assignMapColors()
 {
-  for (auto& [bbox, map_pt] : map_) {
-    map_pt->color = getColor(map_pt->value);
+  for (const auto& map_col : map_) {
+    for (const auto& map_pt : map_col) {
+      map_pt->color = getColor(map_pt->value);
+    }
   }
   colors_correct_ = true;
 }
@@ -638,24 +619,26 @@ double HeatMapDataSource::getRealRangeMaximumValue() const
   return color_lower_bounds_[color_lower_bounds_.size() - 1];
 }
 
-const std::vector<std::pair<int, double>> HeatMapDataSource::getLegendValues() const
+std::vector<std::pair<int, double>> HeatMapDataSource::getLegendValues() const
 {
+  const int color_count = color_generator_.getColorCount();
   const int count = 6;
   std::vector<std::pair<int, double>> values;
-  const double index_incr = static_cast<double>(color_generator_.getColorCount()) / (count - 1);
+  const double index_incr = static_cast<double>(color_count) / (count - 1);
   const double linear_start = getRealRangeMinimumValue();
-  const double linear_step = (getRealRangeMaximumValue() - linear_start) / (count - 1);
+  const double linear_step
+      = (getRealRangeMaximumValue() - linear_start) / (count - 1);
   for (int i = 0; i < count; i++) {
     int idx = std::round(i * index_incr);
-    if (idx > color_generator_.getColorCount()) {
-      idx = color_generator_.getColorCount();
+    if (idx > color_count) {
+      idx = color_count;
     }
     double value = color_lower_bounds_[idx];
     if (!log_scale_) {
       value = linear_step * i + linear_start;
     }
 
-    values.push_back({idx, value});
+    values.emplace_back(idx, value);
   }
   return values;
 }
@@ -663,7 +646,10 @@ const std::vector<std::pair<int, double>> HeatMapDataSource::getLegendValues() c
 void HeatMapDataSource::onShow()
 {
   if (!isPopulated()) {
-    logger_->warn(utl::GUI, 66, "Heat map \"{}\" has not been populated with data.", getName());
+    logger_->warn(utl::GUI,
+                  66,
+                  "Heat map \"{}\" has not been populated with data.",
+                  getName());
   }
 }
 
@@ -678,22 +664,20 @@ void HeatMapDataSource::onHide()
 
 ///////////
 
-HeatMapRenderer::HeatMapRenderer(const std::string& display_control, HeatMapDataSource& datasource) :
-    display_control_(display_control),
-    datasource_(datasource),
-    first_paint_(true)
+HeatMapRenderer::HeatMapRenderer(HeatMapDataSource& datasource)
+    : datasource_(datasource), first_paint_(true)
 {
-  addDisplayControl(display_control_,
+  addDisplayControl(datasource_.getName(),
                     false,
                     [this]() { datasource_.showSetup(); },
-                    {""}); // mutually exclusive to all
+                    {""});  // mutually exclusive to all
 }
 
 void HeatMapRenderer::drawObjects(Painter& painter)
 {
-  if (!checkDisplayControl(display_control_)) {
+  if (!checkDisplayControl(datasource_.getName())) {
     if (!first_paint_) {
-      first_paint_ = true; // reset check
+      first_paint_ = true;  // reset check
       // first time so announce onHide
       datasource_.onHide();
     }
@@ -721,31 +705,79 @@ void HeatMapRenderer::drawObjects(Painter& painter)
 
   const odb::Rect& bounds = painter.getBounds();
 
-  for (const auto& [bbox, map_pt] : datasource_.getMap()) {
-    if (!show_mins && map_pt->value < min_value) {
-      continue;
-    }
-    if (!show_maxs && map_pt->value > max_value) {
-      continue;
-    }
+  // minimum box size is 2 pixels
+  const double min_dbu = 2.0 / painter.getPixelsPerDBU();
 
-    if (bounds.overlaps(map_pt->rect)) {
-      painter.setPen(map_pt->color, true);
-      painter.setBrush(map_pt->color);
+  const double dbu_per_micron = datasource_.getBlock()->getDbUnitsPerMicron();
+  const int x_scale
+      = std::ceil(min_dbu / (datasource_.getGridXSize() * dbu_per_micron));
+  const int y_scale
+      = std::ceil(min_dbu / (datasource_.getGridYSize() * dbu_per_micron));
 
-      painter.drawRect(map_pt->rect);
+  const HeatMapDataSource::MapView map_view = datasource_.getMapView(bounds);
+  const int x_size = map_view.shape()[0];
+  const int y_size = map_view.shape()[1];
+
+  for (int x = 0; x < x_size; x += x_scale) {
+    for (int y = 0; y < y_size; y += y_scale) {
+      HeatMapDataSource::MapColor draw_pt;
+      draw_pt.rect.mergeInit();
+      draw_pt.has_value = false;
+      draw_pt.value = std::numeric_limits<double>::lowest();
+
+      for (int x_sub = 0; x_sub < x_scale; x_sub++) {
+        const int x_idx = x + x_sub;
+        if (x_idx >= x_size) {
+          continue;
+        }
+
+        for (int y_sub = 0; y_sub < y_scale; y_sub++) {
+          const int y_idx = y + y_sub;
+          if (y_idx >= y_size) {
+            continue;
+          }
+
+          const auto& map_pt = map_view[x_idx][y_idx];
+          draw_pt.rect.merge(map_pt->rect);
+          if (!map_pt->has_value) {  // value not set so nothing to do
+            continue;
+          }
+
+          if (draw_pt.value < map_pt->value) {
+            draw_pt.has_value = true;
+            draw_pt.value = map_pt->value;
+            draw_pt.color = map_pt->color;
+          }
+        }
+      }
+
+      if (!draw_pt.has_value) {  // value not set so nothing to draw
+        continue;
+      }
+      if (!show_mins && draw_pt.value < min_value) {
+        continue;
+      }
+      if (!show_maxs && draw_pt.value > max_value) {
+        continue;
+      }
+
+      painter.setPen(draw_pt.color, true);
+      painter.setBrush(draw_pt.color);
+
+      painter.drawRect(draw_pt.rect);
 
       if (show_numbers) {
-        const int x = 0.5 * (map_pt->rect.xMin() + map_pt->rect.xMax());
-        const int y = 0.5 * (map_pt->rect.yMin() + map_pt->rect.yMax());
+        const int x = draw_pt.rect.xCenter();
+        const int y = draw_pt.rect.yCenter();
         const Painter::Anchor text_anchor = Painter::Anchor::CENTER;
         const double text_rect_margin = 0.8;
 
-        const std::string text = datasource_.formatValue(map_pt->value, false);
-        const odb::Rect text_bound = painter.stringBoundaries(x, y, text_anchor, text);
+        const std::string text = datasource_.formatValue(draw_pt.value, false);
+        const odb::Rect text_bound
+            = painter.stringBoundaries(x, y, text_anchor, text);
         bool draw = true;
-        if (text_bound.dx() >= text_rect_margin * map_pt->rect.dx() ||
-            text_bound.dy() >= text_rect_margin * map_pt->rect.dy()) {
+        if (text_bound.dx() >= text_rect_margin * draw_pt.rect.dx()
+            || text_bound.dy() >= text_rect_margin * draw_pt.rect.dy()) {
           // don't draw if text will be too small
           draw = false;
         }
@@ -761,20 +793,22 @@ void HeatMapRenderer::drawObjects(Painter& painter)
   // legend
   if (datasource_.getShowLegend()) {
     std::vector<std::pair<int, std::string>> legend;
-    for (const auto& [color_index, color_value] : datasource_.getLegendValues()) {
-      legend.push_back({color_index, datasource_.formatValue(color_value, true)});
+    for (const auto& [color_index, color_value] :
+         datasource_.getLegendValues()) {
+      legend.emplace_back(color_index,
+                          datasource_.formatValue(color_value, true));
     }
 
     datasource_.getColorGenerator().drawLegend(painter, legend);
   }
 }
 
-const std::string HeatMapRenderer::getSettingsGroupName()
+std::string HeatMapRenderer::getSettingsGroupName()
 {
   return groupname_prefix_ + datasource_.getSettingsGroupName();
 }
 
-const Renderer::Settings HeatMapRenderer::getSettings()
+Renderer::Settings HeatMapRenderer::getSettings()
 {
   Renderer::Settings settings = Renderer::getSettings();
   for (const auto& [name, value] : datasource_.getSettings()) {
@@ -795,443 +829,89 @@ void HeatMapRenderer::setSettings(const Settings& settings)
   datasource_.setSettings(data_settings);
 }
 
-////////////
+//////////
 
-RoutingCongestionDataSource::RoutingCongestionDataSource() :
-    HeatMapDataSource("Routing Congestion", "Routing", "RoutingCongestion"),
-    show_all_(true),
-    show_hor_(false),
-    show_ver_(false)
+RealValueHeatMapDataSource::RealValueHeatMapDataSource(
+    utl::Logger* logger,
+    const std::string& unit_suffix,
+    const std::string& name,
+    const std::string& short_name,
+    const std::string& settings_group)
+    : HeatMapDataSource(logger, name, short_name, settings_group),
+      unit_suffix_(unit_suffix),
+      units_(unit_suffix_),
+      min_(0.0),
+      max_(0.0),
+      scale_(1.0)
 {
 }
 
-void RoutingCongestionDataSource::makeAdditionalSetupOptions(QWidget* parent, QFormLayout* layout, const std::function<void(void)>& changed_callback)
+void RealValueHeatMapDataSource::correctMapScale(HeatMapDataSource::Map& map)
 {
-  QComboBox* congestion_ = new QComboBox(parent);
-  congestion_->addItems({"All", "Horizontal", "Vertical"});
+  determineMinMax(map);
+  determineUnits();
 
-  if (show_all_) {
-    congestion_->setCurrentIndex(0);
-  } else if (show_hor_) {
-    congestion_->setCurrentIndex(1);
-  } else if (show_ver_) {
-    congestion_->setCurrentIndex(2);
+  for (const auto& map_col : map) {
+    for (const auto& map_pt : map_col) {
+      map_pt->value = convertValueToPercent(map_pt->value);
+    }
   }
 
-  layout->addRow("Congestion Layers", congestion_);
+  min_ = roundData(min_ * scale_);
+  max_ = roundData(max_ * scale_);
 
-  QObject::connect(congestion_,
-                   QOverload<int>::of(&QComboBox::currentIndexChanged),
-                   [this](int value) {
-                     show_all_ = value == 0;
-                     show_hor_ = value == 1;
-                     show_ver_ = value == 2;
-                     destroyMap();
-                   });
+  // reset since all data has been scaled by the appropriate amount
+  scale_ = 1.0;
 }
 
-double RoutingCongestionDataSource::getGridXSize() const
+double RealValueHeatMapDataSource::roundData(double value) const
 {
-  if (getBlock() == nullptr) {
-    return default_grid_;
+  const double precision = 1000.0;
+  return std::round(value * precision) / precision;
+}
+
+void RealValueHeatMapDataSource::determineMinMax(
+    const HeatMapDataSource::Map& map)
+{
+  min_ = std::numeric_limits<double>::max();
+  max_ = std::numeric_limits<double>::lowest();
+
+  for (const auto& map_col : map) {
+    for (const auto& map_pt : map_col) {
+      min_ = std::min(min_, map_pt->value);
+      max_ = std::max(max_, map_pt->value);
+    }
   }
+}
 
-  auto* gcellgrid = getBlock()->getGCellGrid();
-  if (gcellgrid == nullptr) {
-    return default_grid_;
-  }
-
-  std::vector<int> grid;
-  gcellgrid->getGridX(grid);
-
-  if (grid.size() < 2) {
-    return default_grid_;
+void RealValueHeatMapDataSource::determineUnits()
+{
+  const double range = getValueRange();
+  if (range >= 1.0 || range == 0) {
+    units_ = "";
+    scale_ = 1.0;
+  } else if (range > 1e-3) {
+    units_ = "m";
+    scale_ = 1e3;
+  } else if (range > 1e-6) {
+    units_ = "\u03BC";  // micro
+    scale_ = 1e6;
+  } else if (range > 1e-9) {
+    units_ = "n";
+    scale_ = 1e9;
+  } else if (range > 1e-12) {
+    units_ = "p";
+    scale_ = 1e12;
   } else {
-    const double delta = grid[1] - grid[0];
-    return delta / getBlock()->getDbUnitsPerMicron();
-  }
-}
-
-double RoutingCongestionDataSource::getGridYSize() const
-{
-  if (getBlock() == nullptr) {
-    return default_grid_;
+    units_ = "f";
+    scale_ = 1e15;
   }
 
-  auto* gcellgrid = getBlock()->getGCellGrid();
-  if (gcellgrid == nullptr) {
-    return default_grid_;
-  }
-
-  std::vector<int> grid;
-  gcellgrid->getGridY(grid);
-
-  if (grid.size() < 2) {
-    return default_grid_;
-  } else {
-    const double delta = grid[1] - grid[0];
-    return delta / getBlock()->getDbUnitsPerMicron();
-  }
+  units_ += unit_suffix_;
 }
 
-bool RoutingCongestionDataSource::populateMap()
-{
-  if (getBlock() == nullptr) {
-    return false;
-  }
-
-  auto* grid = getBlock()->getGCellGrid();
-  if (grid == nullptr) {
-    return false;
-  }
-
-  auto gcell_congestion_data = grid->getCongestionMap();
-  if (gcell_congestion_data.empty()) {
-    return false;
-  }
-
-  std::vector<int> x_grid, y_grid;
-  grid->getGridX(x_grid);
-  const uint x_grid_sz = x_grid.size();
-  grid->getGridY(y_grid);
-  const uint y_grid_sz = y_grid.size();
-
-  for (const auto& [key, cong_data] : gcell_congestion_data) {
-    const uint x_idx = key.first;
-    const uint y_idx = key.second;
-
-    if (x_idx + 1 >= x_grid_sz || y_idx + 1 >= y_grid_sz) {
-      continue;
-    }
-
-    const odb::Rect gcell_rect(
-        x_grid[x_idx], y_grid[y_idx], x_grid[x_idx + 1], y_grid[y_idx + 1]);
-
-    const auto hor_capacity = cong_data.horizontal_capacity;
-    const auto hor_usage = cong_data.horizontal_usage;
-    const auto ver_capacity = cong_data.vertical_capacity;
-    const auto ver_usage = cong_data.vertical_usage;
-
-    //-1 indicates capacity is not well defined...
-    const double hor_congestion
-        = hor_capacity != 0 ? static_cast<double>(hor_usage) / hor_capacity : -1;
-    const double ver_congestion
-        = ver_capacity != 0 ? static_cast<double>(ver_usage) / ver_capacity : -1;
-
-    double congestion = 0.0;
-    if (show_all_) {
-      congestion = std::max(hor_congestion, ver_congestion);
-    } else if (show_hor_) {
-      congestion = hor_congestion;
-    } else {
-      congestion = ver_congestion;
-    }
-
-    if (congestion < 0) {
-      continue;
-    }
-
-    addToMap(gcell_rect, 100 * congestion);
-  }
-
-  return true;
-}
-
-void RoutingCongestionDataSource::combineMapData(double& base, const double new_data, const double data_area, const double intersection_area, const double rect_area)
-{
-  base += new_data * intersection_area / rect_area;
-}
-
-const Renderer::Settings RoutingCongestionDataSource::getSettings() const
-{
-  auto settings = HeatMapDataSource::getSettings();
-
-  settings["ShowAll"] = show_all_;
-  settings["ShowHor"] = show_hor_;
-  settings["ShowVer"] = show_ver_;
-
-  return settings;
-}
-
-void RoutingCongestionDataSource::setSettings(const Renderer::Settings& settings)
-{
-  HeatMapDataSource::setSettings(settings);
-
-  Renderer::setSetting<bool>(settings, "ShowAll", show_all_);
-  Renderer::setSetting<bool>(settings, "ShowHor", show_hor_);
-  Renderer::setSetting<bool>(settings, "ShowVer", show_ver_);
-}
-
-////////////
-
-PlacementDensityDataSource::PlacementDensityDataSource() :
-    HeatMapDataSource("Placement Density", "Placement", "PlacementDensity"),
-    include_taps_(true),
-    include_filler_(false),
-    include_io_(false)
-{
-}
-
-bool PlacementDensityDataSource::populateMap()
-{
-  if (getBlock() == nullptr) {
-    return false;
-  }
-
-  for (auto* inst : getBlock()->getInsts()) {
-    if (!inst->getPlacementStatus().isPlaced()) {
-      continue;
-    }
-    if (!include_filler_ && inst->getMaster()->isFiller()) {
-      continue;
-    }
-    if (!include_taps_ && (inst->getMaster()->getType() == odb::dbMasterType::CORE_WELLTAP || inst->getMaster()->isEndCap())) {
-      continue;
-    }
-    if (!include_io_ && (inst->getMaster()->isPad() || inst->getMaster()->isCover())) {
-      continue;
-    }
-    odb::Rect inst_box;
-    inst->getBBox()->getBox(inst_box);
-
-    addToMap(inst_box, 100.0);
-  }
-
-  return true;
-}
-
-void PlacementDensityDataSource::combineMapData(double& base, const double new_data, const double data_area, const double intersection_area, const double rect_area)
-{
-  base += new_data * intersection_area / rect_area;
-}
-
-void PlacementDensityDataSource::makeAdditionalSetupOptions(QWidget* parent, QFormLayout* layout, const std::function<void(void)>& changed_callback)
-{
-  QCheckBox* taps = new QCheckBox(parent);
-  taps->setCheckState(include_taps_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Include taps and endcaps", taps);
-
-  QCheckBox* filler = new QCheckBox(parent);
-  filler->setCheckState(include_filler_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Include fillers", filler);
-
-  QCheckBox* io = new QCheckBox(parent);
-  io->setCheckState(include_io_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Include IO", io);
-
-  QObject::connect(taps,
-                   &QCheckBox::stateChanged,
-                   [this](int value) {
-                     include_taps_ = value == Qt::Checked;
-                     destroyMap();
-                   });
-
-  QObject::connect(filler,
-                   &QCheckBox::stateChanged,
-                   [this](int value) {
-                     include_filler_ = value == Qt::Checked;
-                     destroyMap();
-                   });
-
-  QObject::connect(io,
-                   &QCheckBox::stateChanged,
-                   [this](int value) {
-                     include_io_ = value == Qt::Checked;
-                     destroyMap();
-                   });
-}
-
-const Renderer::Settings PlacementDensityDataSource::getSettings() const
-{
-  auto settings = HeatMapDataSource::getSettings();
-
-  settings["Taps"] = include_taps_;
-  settings["Filler"] = include_filler_;
-  settings["IO"] = include_io_;
-
-  return settings;
-}
-
-void PlacementDensityDataSource::setSettings(const Renderer::Settings& settings)
-{
-  HeatMapDataSource::setSettings(settings);
-
-  Renderer::setSetting<bool>(settings, "Taps", include_taps_);
-  Renderer::setSetting<bool>(settings, "Filler", include_filler_);
-  Renderer::setSetting<bool>(settings, "IO", include_io_);
-}
-
-void PlacementDensityDataSource::onShow()
-{
-  HeatMapDataSource::onShow();
-
-  addOwner(getBlock());
-}
-
-void PlacementDensityDataSource::onHide()
-{
-  HeatMapDataSource::onHide();
-
-  removeOwner();
-}
-
-void PlacementDensityDataSource::inDbInstCreate(odb::dbInst*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbInstCreate(odb::dbInst*, odb::dbRegion*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbInstDestroy(odb::dbInst*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbInstPlacementStatusBefore(odb::dbInst*, const odb::dbPlacementStatus&)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbInstSwapMasterBefore(odb::dbInst*, odb::dbMaster*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbInstSwapMasterAfter(odb::dbInst*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbPreMoveInst(odb::dbInst*)
-{
-  destroyMap();
-}
-
-void PlacementDensityDataSource::inDbPostMoveInst(odb::dbInst*)
-{
-  destroyMap();
-}
-
-////////////
-
-PowerDensityDataSource::PowerDensityDataSource() :
-    HeatMapDataSource("Power Density", "Power", "PowerDensity"),
-    sta_(nullptr),
-    include_internal_(true),
-    include_leakage_(true),
-    include_switching_(true),
-    min_power_(0.0),
-    max_power_(0.0),
-    units_("W"),
-    corner_(nullptr)
-{
-  setIssueRedraw(false); // disable during initial setup
-  setLogScale(true);
-  setIssueRedraw(true);
-}
-
-bool PowerDensityDataSource::populateMap()
-{
-  if (getBlock() == nullptr || sta_ == nullptr) {
-    return false;
-  }
-
-  if (sta_->cmdNetwork() == nullptr) {
-    return false;
-  }
-
-  ensureCorner();
-
-  auto* network = sta_->getDbNetwork();
-
-  const bool include_all = include_internal_ && include_leakage_ && include_switching_;
-  for (auto* inst : getBlock()->getInsts()) {
-    if (!inst->getPlacementStatus().isPlaced()) {
-      continue;
-    }
-
-    sta::PowerResult power;
-    sta_->power(network->dbToSta(inst), corner_, power);
-
-    float pwr = 0.0;
-    if (include_all) {
-      pwr = power.total();
-    } else {
-      if (include_internal_) {
-        pwr += power.internal();
-      }
-      if (include_leakage_) {
-        pwr += power.switching();
-      }
-      if (include_switching_) {
-        pwr += power.leakage();
-      }
-    }
-
-    odb::Rect inst_box;
-    inst->getBBox()->getBox(inst_box);
-
-    addToMap(inst_box, pwr);
-  }
-
-  return true;
-}
-
-void PowerDensityDataSource::combineMapData(double& base, const double new_data, const double data_area, const double intersection_area, const double rect_area)
-{
-  base += (new_data / data_area) * intersection_area;
-}
-
-void PowerDensityDataSource::correctMapScale(HeatMapDataSource::Map& map)
-{
-  min_power_ = std::numeric_limits<double>::max();
-  max_power_ = std::numeric_limits<double>::min();
-
-  for (const auto& [bbox, map_pt] : map) {
-    min_power_ = std::min(min_power_, map_pt->value);
-    max_power_ = std::max(max_power_, map_pt->value);
-  }
-
-  auto round_data = [](double value, double scale) -> double {
-    const double precision = 1000.0;
-    double new_value = value * scale;
-    return std::round(new_value * precision) / precision;
-  };
-
-  double scale;
-  determineUnits(units_, scale);
-  max_power_ = round_data(max_power_, scale);
-  min_power_ = round_data(min_power_, scale);
-
-  for (auto& [bbox, map_pt] : map) {
-    map_pt->value = convertValueToPercent(round_data(map_pt->value, scale));
-  }
-}
-
-void PowerDensityDataSource::determineUnits(std::string& text, double& scale) const
-{
-  if (max_power_ > 1 || max_power_ == 0.0) {
-    text = "W";
-    scale = 1.0;
-  } else if (max_power_ > 1e-3) {
-    text = "mW";
-    scale = 1e3;
-  } else if (max_power_ > 1e-6) {
-    text = "\u03BCW"; // micro W
-    scale = 1e6;
-  } else if (max_power_ > 1e-9) {
-    text = "nW";
-    scale = 1e9;
-  } else {
-    text = "pW";
-    scale = 1e12;
-  }
-}
-
-const std::string PowerDensityDataSource::formatValue(double value, bool legend) const
+std::string RealValueHeatMapDataSource::formatValue(double value,
+                                                    bool legend) const
 {
   int digits = legend ? 3 : 2;
 
@@ -1243,148 +923,131 @@ const std::string PowerDensityDataSource::formatValue(double value, bool legend)
   return text.toStdString();
 }
 
-const std::string PowerDensityDataSource::getValueUnits() const
+std::string RealValueHeatMapDataSource::getValueUnits() const
 {
   return units_;
 }
 
-double PowerDensityDataSource::getValueRange() const
+double RealValueHeatMapDataSource::getValueRange() const
 {
-  double range = max_power_ - min_power_;
+  double range = max_ - min_;
   if (range == 0.0) {
-    range = 1.0; // dummy numbers until power has been populated
+    range = 1.0;  // dummy numbers until drops has been populated
   }
   return range;
 }
 
-double PowerDensityDataSource::convertValueToPercent(double value) const
+double RealValueHeatMapDataSource::convertValueToPercent(double value) const
 {
   const double range = getValueRange();
-  const double offset = min_power_;
+  const double offset = min_;
 
-  return 100.0 * (value - offset) / range;
+  return roundData(100.0 * (value - offset) / range);
 }
 
-double PowerDensityDataSource::convertPercentToValue(double percent) const
+double RealValueHeatMapDataSource::convertPercentToValue(double percent) const
 {
   const double range = getValueRange();
-  const double offset = min_power_;
+  const double offset = min_;
 
-  return percent * range / 100.0 + offset;
+  return roundData(percent * range / 100.0 + offset);
 }
 
-double PowerDensityDataSource::getDisplayRangeIncrement() const
+double RealValueHeatMapDataSource::getDisplayRangeIncrement() const
 {
   return getValueRange() / 100.0;
 }
 
-void PowerDensityDataSource::makeAdditionalSetupOptions(QWidget* parent, QFormLayout* layout, const std::function<void(void)>& changed_callback)
-{
-  ensureCorner();
+///////////////////////////
 
-  QComboBox* corners = nullptr;
-  if (sta_->multiCorner()) {
-    corners = new QComboBox(parent);
-    int selection = 0;
-    for (auto* corner : *sta_->corners()) {
-      corners->addItem(corner->name());
-      if (corner_ == corner) {
-        selection = corners->count() - 1;
+GlobalRoutingDataSource::GlobalRoutingDataSource(
+    utl::Logger* logger,
+    const std::string& name,
+    const std::string& short_name,
+    const std::string& settings_group)
+    : HeatMapDataSource(logger, name, short_name, settings_group)
+{
+}
+
+std::pair<double, double> GlobalRoutingDataSource::getReportableXYGrid() const
+{
+  if (getBlock() == nullptr) {
+    return {default_grid_, default_grid_};
+  }
+
+  auto* gCellGrid = getBlock()->getGCellGrid();
+  if (gCellGrid == nullptr) {
+    return {default_grid_, default_grid_};
+  }
+
+  auto grid_mode = [gCellGrid](int num_grids,
+                               void (odb::dbGCellGrid::*get_grid)(
+                                   int, int&, int&, int&)) -> int {
+    std::map<int, int> grid_pitch_count;
+    for (int i = 0; i < num_grids; i++) {
+      int origin, count, step;
+      (gCellGrid->*get_grid)(i, origin, count, step);
+      grid_pitch_count[step] += count;
+    }
+
+    if (grid_pitch_count.empty()) {
+      return default_grid_;
+    }
+
+    auto mode = grid_pitch_count.begin();
+    for (auto check_mode = grid_pitch_count.begin();
+         check_mode != grid_pitch_count.end();
+         check_mode++) {
+      if (mode->second < check_mode->second) {
+        mode = check_mode;
       }
     }
-    corners->setCurrentIndex(selection);
-    layout->addRow("Corner", corners);
-  }
+    return mode->first;
+  };
 
-  QCheckBox* internal = new QCheckBox(parent);
-  internal->setCheckState(include_internal_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Internal power", internal);
+  const double x_grid = grid_mode(gCellGrid->getNumGridPatternsX(),
+                                  &odb::dbGCellGrid::getGridPatternX);
+  const double y_grid = grid_mode(gCellGrid->getNumGridPatternsY(),
+                                  &odb::dbGCellGrid::getGridPatternY);
 
-  QCheckBox* switching = new QCheckBox(parent);
-  switching->setCheckState(include_switching_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Switching power", switching);
-
-  QCheckBox* leakage = new QCheckBox(parent);
-  leakage->setCheckState(include_leakage_ ? Qt::Checked : Qt::Unchecked);
-  layout->addRow("Leakage power", leakage);
-
-  QObject::connect(internal,
-                   &QCheckBox::stateChanged,
-                   [this, changed_callback](int value) {
-                     include_internal_ = value == Qt::Checked;
-                     destroyMap();
-                     changed_callback();
-                   });
-
-  QObject::connect(switching,
-                   &QCheckBox::stateChanged,
-                   [this, changed_callback](int value) {
-                     include_switching_ = value == Qt::Checked;
-                     destroyMap();
-                     changed_callback();
-                   });
-
-  QObject::connect(leakage,
-                   &QCheckBox::stateChanged,
-                   [this, changed_callback](int value) {
-                     include_leakage_ = value == Qt::Checked;
-                     destroyMap();
-                     changed_callback();
-                   });
-
-  if (corners != nullptr) {
-    QObject::connect(corners,
-                     &QComboBox::currentTextChanged,
-                     [this, changed_callback](const QString& corner) {
-                       setCorner(corner.toStdString());
-                       destroyMap();
-                       changed_callback();
-                     });
-  }
+  const double dbus = getBlock()->getDbUnitsPerMicron();
+  return {x_grid / dbus, y_grid / dbus};
 }
 
-const Renderer::Settings PowerDensityDataSource::getSettings() const
+double GlobalRoutingDataSource::getGridXSize() const
 {
-  auto settings = HeatMapDataSource::getSettings();
-
-  settings["Internal"] = include_internal_;
-  settings["Switching"] = include_switching_;
-  settings["Leakage"] = include_leakage_;
-  if (corner_ != nullptr) {
-    settings["corner"] = std::string(corner_->name());
-  }
-
-  return settings;
+  const auto& [x, y] = getReportableXYGrid();
+  return x;
 }
 
-void PowerDensityDataSource::setSettings(const Renderer::Settings& settings)
+double GlobalRoutingDataSource::getGridYSize() const
 {
-  ensureCorner();
-
-  HeatMapDataSource::setSettings(settings);
-
-  Renderer::setSetting<bool>(settings, "Internal", include_internal_);
-  Renderer::setSetting<bool>(settings, "Switching", include_switching_);
-  Renderer::setSetting<bool>(settings, "Leakage", include_leakage_);
-
-  std::string corner = corner_->name();
-  Renderer::setSetting<std::string>(settings, "corner", corner);
-  setCorner(corner);
+  const auto& [x, y] = getReportableXYGrid();
+  return y;
 }
 
-void PowerDensityDataSource::ensureCorner()
+void GlobalRoutingDataSource::populateXYGrid()
 {
-  if (corner_ != nullptr) {
+  if (getBlock() == nullptr) {
+    HeatMapDataSource::populateXYGrid();
     return;
   }
 
-  auto corners = sta_->corners()->corners();
-  corner_ = corners[0];
-}
+  auto* gCellGrid = getBlock()->getGCellGrid();
+  if (gCellGrid == nullptr) {
+    HeatMapDataSource::populateXYGrid();
+    return;
+  }
 
-void PowerDensityDataSource::setCorner(const std::string& name)
-{
-  corner_ = sta_->findCorner(name.c_str());
+  std::vector<int> gcell_xgrid, gcell_ygrid;
+  gCellGrid->getGridX(gcell_xgrid);
+  gCellGrid->getGridY(gcell_ygrid);
+
+  const auto die_area = getBlock()->getDieArea();
+  gcell_xgrid.push_back(die_area.xMax());
+  gcell_ygrid.push_back(die_area.yMax());
+
+  setXYMapGrid(gcell_xgrid, gcell_ygrid);
 }
 
 }  // namespace gui

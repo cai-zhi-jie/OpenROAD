@@ -25,13 +25,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "boostParser.h"
 #include <iostream>
 #include <string>
 
-#include "db.h"
+#include "boostParser.h"
 #include "lefLayerPropParser.h"
-#include "lefin.h"
+#include "odb/db.h"
+#include "odb/lefin.h"
 
 namespace lefTechLayerSpacingTablePrl {
 
@@ -117,22 +117,26 @@ bool parse(Iterator first,
   bool valid
       = qi::phrase_parse(first, last, spacingTableRule, space) && first == last;
 
-  if (!valid)  // fail if we did not get a full match
+  if (!valid) {  // fail if we did not get a full match
     odb::dbTechLayerSpacingTablePrlRule::destroy(rule);
-  else {
-    if (parser->spacing_tbl.size() != parser->width_tbl.size())
+  } else {
+    if (parser->spacing_tbl.size() != parser->width_tbl.size()) {
       valid = false;
-    for (auto spacing : parser->spacing_tbl)
-      if (spacing.size() != parser->length_tbl.size())
+    }
+    for (const auto& spacing : parser->spacing_tbl) {
+      if (spacing.size() != parser->length_tbl.size()) {
         valid = false;
+      }
+    }
     if (valid) {
       rule->setTable(parser->width_tbl,
                      parser->length_tbl,
                      parser->spacing_tbl,
                      parser->within_map);
       rule->setSpacingTableInfluence(parser->influence_tbl);
-    } else
+    } else {
       odb::dbTechLayerSpacingTablePrlRule::destroy(rule);
+    }
   }
   return valid;
 }

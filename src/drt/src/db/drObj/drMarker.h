@@ -26,19 +26,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DR_MARKER_H_
-#define _DR_MARKER_H_
+#pragma once
 
 #include "db/drObj/drBlockObject.h"
 
-namespace fr {
+namespace drt {
 class frConstraint;
 class drNet;
 class drMazeMarker : public drBlockObject
 {
  public:
   // constructors
-  drMazeMarker() : constraint_(nullptr), trigNets_(), cnt_(0) {}
+  drMazeMarker() = default;
   // setters
   void setConstraint(frConstraint* in) { constraint_ = in; }
   void addTrigNet(drNet* in)
@@ -77,9 +76,9 @@ class drMazeMarker : public drBlockObject
   }
 
  private:
-  frConstraint* constraint_;
+  frConstraint* constraint_{nullptr};
   std::map<drNet*, int> trigNets_;
-  int cnt_;
+  int cnt_{0};
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -92,5 +91,4 @@ class drMazeMarker : public drBlockObject
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
-#endif
+}  // namespace drt

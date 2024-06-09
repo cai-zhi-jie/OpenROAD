@@ -26,18 +26,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DR_SHAPE_H_
-#define _DR_SHAPE_H_
+#pragma once
 
 #include "db/drObj/drFig.h"
 #include "db/infra/frSegStyle.h"
 #include "dr/FlexMazeTypes.h"
 
-namespace fr {
+namespace drt {
+
 class drNet;
 class drPin;
 class frPathSeg;
 class frPatchWire;
+
 class drShape : public drPinFig
 {
  public:
@@ -66,11 +67,8 @@ class drShape : public drPinFig
    * move
    * overlaps
    */
- protected:
-  // constructors
-  drShape() : drPinFig() {}
-  drShape(const drShape& in) : drPinFig(in) {}
 
+ protected:
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
   {
@@ -84,50 +82,38 @@ class drPathSeg : public drShape
 {
  public:
   // constructors
-  drPathSeg()
-      : drShape(),
-        begin_(),
-        end_(),
-        layer_(0),
-        style_(),
-        owner_(nullptr),
-        beginMazeIdx_(),
-        endMazeIdx_(),
-        patchSeg_(false),
-        isTapered_(false)
-  {
-  }
-  drPathSeg(const drPathSeg& in)
-      : drShape(in),
-        begin_(in.begin_),
-        end_(in.end_),
-        layer_(in.layer_),
-        style_(in.style_),
-        owner_(in.owner_),
-        beginMazeIdx_(in.beginMazeIdx_),
-        endMazeIdx_(in.endMazeIdx_),
-        patchSeg_(in.patchSeg_),
-        isTapered_(in.isTapered_)
-  {
-  }
+  drPathSeg() = default;
+  drPathSeg(const drPathSeg& in) = default;
   drPathSeg(const frPathSeg& in);
   // getters
-  void getPoints(Point& beginIn, Point& endIn) const
-  {
-    beginIn = begin_;
-    endIn = end_;
-  }
+  std::pair<Point, Point> getPoints() const { return {begin_, end_}; }
 
+  frCoord length() const
+  {
+    // assuming it is always orthogonal
+    return end_.x() - begin_.x() + end_.y() - begin_.y();
+  }
   const Point& getBeginPoint() const { return begin_; }
 
   const Point& getEndPoint() const { return end_; }
 
-  void getStyle(frSegStyle& styleIn) const
+  bool isVertical() const { return begin_.x() == end_.x(); }
+
+  frCoord low() const
   {
-    styleIn.setBeginStyle(style_.getBeginStyle(), style_.getBeginExt());
-    styleIn.setEndStyle(style_.getEndStyle(), style_.getEndExt());
-    styleIn.setWidth(style_.getWidth());
+    if (isVertical()) {
+      return begin_.y();
+    }
+    return begin_.x();
   }
+  frCoord high() const
+  {
+    if (isVertical()) {
+      return end_.y();
+    }
+    return end_.x();
+  }
+  frSegStyle getStyle() const { return style_; }
   // setters
   void setPoints(const Point& beginIn, const Point& endIn)
   {
@@ -140,11 +126,11 @@ class drPathSeg : public drShape
     style_.setEndStyle(styleIn.getEndStyle(), styleIn.getEndExt());
     style_.setWidth(styleIn.getWidth());
   }
-  void setBeginStyle(frEndStyle bs, frUInt4 ext = 0)
+  void setBeginStyle(const frEndStyle& bs, frUInt4 ext = 0)
   {
     style_.setBeginStyle(bs, ext);
   }
-  void setEndStyle(frEndStyle es, frUInt4 ext = 0)
+  void setEndStyle(const frEndStyle& es, frUInt4 ext = 0)
   {
     style_.setEndStyle(es, ext);
   }
@@ -208,33 +194,12 @@ class drPathSeg : public drShape
    * overlaps, in .cpp
    */
   // needs to be updated
-  void getBBox(Rect& boxIn) const override
-  {
-    bool isHorizontal = true;
-    if (begin_.x() == end_.x()) {
-      isHorizontal = false;
-    }
-    auto width = style_.getWidth();
-    auto beginExt = style_.getBeginExt();
-    auto endExt = style_.getEndExt();
-    if (isHorizontal) {
-      boxIn.init(begin_.x() - beginExt,
-                 begin_.y() - width / 2,
-                 end_.x() + endExt,
-                 end_.y() + width / 2);
-    } else {
-      boxIn.init(begin_.x() - width / 2,
-                 begin_.y() - beginExt,
-                 end_.x() + width / 2,
-                 end_.y() + endExt);
-    }
-  }
+  Rect getBBox() const override;
 
   bool hasMazeIdx() const { return (!beginMazeIdx_.empty()); }
-  void getMazeIdx(FlexMazeIdx& bi, FlexMazeIdx& ei) const
+  std::pair<FlexMazeIdx, FlexMazeIdx> getMazeIdx() const
   {
-    bi.set(beginMazeIdx_);
-    ei.set(endMazeIdx_);
+    return {beginMazeIdx_, endMazeIdx_};
   }
   void setMazeIdx(FlexMazeIdx& bi, FlexMazeIdx& ei)
   {
@@ -249,13 +214,13 @@ class drPathSeg : public drShape
  protected:
   Point begin_;  // begin always smaller than end, assumed
   Point end_;
-  frLayerNum layer_;
+  frLayerNum layer_{0};
   frSegStyle style_;
-  drBlockObject* owner_;
+  drBlockObject* owner_{nullptr};
   FlexMazeIdx beginMazeIdx_;
   FlexMazeIdx endMazeIdx_;
-  bool patchSeg_;
-  bool isTapered_;
+  bool patchSeg_{false};
+  bool isTapered_{false};
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -279,14 +244,8 @@ class drPatchWire : public drShape
 {
  public:
   // constructors
-  drPatchWire()
-      : drShape(), offsetBox_(), origin_(), layer_(0), owner_(nullptr){};
-  drPatchWire(const drPatchWire& in)
-      : drShape(in),
-        offsetBox_(in.offsetBox_),
-        origin_(in.origin_),
-        layer_(in.layer_),
-        owner_(in.owner_){};
+  drPatchWire() = default;
+  drPatchWire(const drPatchWire& in) = default;
   drPatchWire(const frPatchWire& in);
   // others
   frBlockObjectEnum typeId() const override { return drcPatchWire; }
@@ -342,24 +301,25 @@ class drPatchWire : public drShape
    * getBBox
    * setBBox
    */
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
     dbTransform xform(origin_);
-    boxIn = offsetBox_;
-    xform.apply(boxIn);
+    Rect box = offsetBox_;
+    xform.apply(box);
+    return box;
   }
 
-  void getOffsetBox(Rect& boxIn) const { boxIn = offsetBox_; }
+  Rect getOffsetBox() const { return offsetBox_; }
   void setOffsetBox(const Rect& boxIn) { offsetBox_ = boxIn; }
 
-  void getOrigin(Point& in) const { in = origin_; }
+  Point getOrigin() const { return origin_; }
   void setOrigin(const Point& in) { origin_ = in; }
 
  protected:
   Rect offsetBox_;
   Point origin_;
-  frLayerNum layer_;
-  drBlockObject* owner_;
+  frLayerNum layer_{0};
+  drBlockObject* owner_{nullptr};
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -373,6 +333,5 @@ class drPatchWire : public drShape
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

@@ -26,18 +26,17 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_INSTTERM_H_
-#define _FR_INSTTERM_H_
+#pragma once
 
 #include <memory>
 
 #include "db/obj/frBlockObject.h"
 #include "db/obj/frInst.h"
+#include "db/obj/frMTerm.h"
 #include "db/obj/frNet.h"
-#include "db/obj/frTerm.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class frInst;
 class frAccessPoint;
@@ -46,19 +45,13 @@ class frInstTerm : public frBlockObject
 {
  public:
   // constructors
-  frInstTerm(frInst* inst, frTerm* term)
-      : inst_(inst), term_(term), net_(nullptr), ap_()
-  {
-  }
-  frInstTerm(const frInstTerm& in)
-      : frBlockObject(), inst_(in.inst_), term_(in.term_), net_(in.net_), ap_()
-  {
-  }
+  frInstTerm(frInst* inst, frMTerm* term) : inst_(inst), term_(term) {}
+  frInstTerm(const frInstTerm& in) = delete;
   // getters
   bool hasNet() const { return (net_); }
   frNet* getNet() const { return net_; }
   frInst* getInst() const { return inst_; }
-  frTerm* getTerm() const { return term_; }
+  frMTerm* getTerm() const { return term_; }
   void addToNet(frNet* in) { net_ = in; }
   const std::vector<frAccessPoint*>& getAccessPoints() const { return ap_; }
   frAccessPoint* getAccessPoint(int idx) const { return ap_[idx]; }
@@ -67,44 +60,24 @@ class frInstTerm : public frBlockObject
   void setAPSize(int size) { ap_.resize(size, nullptr); }
   void setAccessPoint(int idx, frAccessPoint* in) { ap_[idx] = in; }
   void addAccessPoint(frAccessPoint* in) { ap_.push_back(in); }
+  void setAccessPoints(const std::vector<frAccessPoint*>& in) { ap_ = in; }
   // others
   frBlockObjectEnum typeId() const override { return frcInstTerm; }
   frAccessPoint* getAccessPoint(frCoord x, frCoord y, frLayerNum lNum);
   bool hasAccessPoint(frCoord x, frCoord y, frLayerNum lNum);
   void getShapes(std::vector<frRect>& outShapes, bool updatedTransform = false);
-  Rect getBBox();
+  Rect getBBox(bool updatedTransform);
+  void setIndexInOwner(int in) { index_in_owner_ = in; }
+  int getIndexInOwner() const { return index_in_owner_; }
 
  private:
+  // Place this first so it is adjacent to "int id_" inherited from
+  // frBlockObject, saving 8 bytes.
+  int index_in_owner_{0};
   frInst* inst_;
-  frTerm* term_;
-  frNet* net_;
+  frMTerm* term_;
+  frNet* net_{nullptr};
   std::vector<frAccessPoint*> ap_;  // follows pin index
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & inst_;
-    (ar) & term_;
-    (ar) & net_;
-    (ar) & ap_;
-    if(fr::is_loading(ar)) {
-      if (inst_) {
-        std::unique_ptr<frInstTerm> ptr(this);
-        inst_->addInstTerm(std::move(ptr));
-      }
-
-      if (net_) {
-        net_->addInstTerm(this);
-      }
-    }
-  }
-
-  frInstTerm() = default;  // for serialization
-
-  friend class boost::serialization::access;
 };
 
-}  // namespace fr
-
-#endif
+}  // namespace drt

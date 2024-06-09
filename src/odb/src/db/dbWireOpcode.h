@@ -32,8 +32,8 @@
 
 #pragma once
 
-#include "db.h"
-#include "odb.h"
+#include "odb/db.h"
+#include "odb/odb.h"
 
 namespace odb {
 
@@ -55,22 +55,24 @@ namespace odb {
 //                                               D == WOP_DEFAULT_WIDTH,
 //                                               B == WOP_BLOCK_RULE
 //                                               X == unused bit
-#define WOP_PATH 0       //  W W W X 0 0 0 0 :  operand = layer-id
-#define WOP_SHORT 1      //  W W W X 0 0 0 1 :  operand = junction-id
-#define WOP_JUNCTION 2   //  W W W X 0 0 1 0 :  operand = junction-id
-#define WOP_RULE 3       //  B X X X 0 0 1 1 :  operand = rule-id
-#define WOP_X 4          //  E D X X 0 1 0 0 :  operand = x-coord
-#define WOP_Y 5          //  E D X X 0 1 0 1 :  operand = y-coord
-#define WOP_COLINEAR 6   //  E X X X 0 1 1 0 :  operand = (e == 1) ? ext : 0
-#define WOP_VIA 7        //  T X X X 0 1 1 1 :  operand = via-id
-#define WOP_TECH_VIA 8   //  T X X X 1 0 0 0 :  operand = via-id
-#define WOP_ITERM 9      //  X X X X 1 0 0 1 :  operand = iterm-id
-#define WOP_BTERM 10     //  X X X X 1 0 1 0 :  operand = bterm-id
-#define WOP_OPERAND 11   //  X X X X 1 0 1 1 :  operand = integer operand
-#define WOP_PROPERTY 12  //  X X X X 1 1 0 0 :  operand = integer operand
-#define WOP_VWIRE 13     //  W W W X 1 1 0 1 :  operand = integer operand
-#define WOP_RECT 14      //  X X X X 1 1 1 0 :  operand = first offset
-#define WOP_NOP 15       //  X X X X 1 1 1 1 :  operand = 0
+#define WOP_PATH 0       //  W W W 0 0 0 0 0 :  operand = layer-id
+#define WOP_SHORT 1      //  W W W 0 0 0 0 1 :  operand = junction-id
+#define WOP_JUNCTION 2   //  W W W 0 0 0 1 0 :  operand = junction-id
+#define WOP_RULE 3       //  B X X 0 0 0 1 1 :  operand = rule-id
+#define WOP_X 4          //  E D X 0 0 1 0 0 :  operand = x-coord
+#define WOP_Y 5          //  E D X 0 0 1 0 1 :  operand = y-coord
+#define WOP_COLINEAR 6   //  E X X 0 0 1 1 0 :  operand = (e == 1) ? ext : 0
+#define WOP_VIA 7        //  T X X 0 0 1 1 1 :  operand = via-id
+#define WOP_TECH_VIA 8   //  T X X 0 1 0 0 0 :  operand = via-id
+#define WOP_ITERM 9      //  X X X 0 1 0 0 1 :  operand = iterm-id
+#define WOP_BTERM 10     //  X X X 0 1 0 1 0 :  operand = bterm-id
+#define WOP_OPERAND 11   //  X X X 0 1 0 1 1 :  operand = integer operand
+#define WOP_PROPERTY 12  //  X X X 0 1 1 0 0 :  operand = integer operand
+#define WOP_VWIRE 13     //  W W W 0 1 1 0 1 :  operand = integer operand
+#define WOP_RECT 14      //  X X X 0 1 1 1 0 :  operand = first offset
+#define WOP_NOP 15       //  X X X 0 1 1 1 1 :  operand = 0
+#define WOP_COLOR 16     //  X X X 1 0 0 0 0 :  operand = integer operand
+#define WOP_VIACOLOR 17  //  X X X 1 0 0 0 1 :  operand = via color
 
 // opcode-flags
 #define WOP_VIA_EXIT_TOP \
@@ -103,9 +105,9 @@ namespace odb {
 
 struct WirePoint
 {
-  int _x;
-  int _y;
-  dbTechLayer* _layer;
+  int _x = 0;
+  int _y = 0;
+  dbTechLayer* _layer = nullptr;
 };
 
 template <class O, class D>
@@ -135,8 +137,9 @@ prevOpCode:
       if (get_layer) {
         pnt._layer = dbTechLayer::getTechLayer(tech, data[idx]);
 
-        if ((look_for_x == false) && (look_for_y == false))
+        if ((look_for_x == false) && (look_for_y == false)) {
           return;
+        }
 
         get_layer = false;
       }
@@ -155,8 +158,9 @@ prevOpCode:
         look_for_x = false;
         pnt._x = data[idx];
 
-        if ((look_for_y == false) && (get_layer == false))
+        if ((look_for_y == false) && (get_layer == false)) {
           return;
+        }
       }
 
       --idx;
@@ -168,8 +172,9 @@ prevOpCode:
         look_for_y = false;
         pnt._y = data[idx];
 
-        if ((look_for_x == false) && (get_layer == false))
+        if ((look_for_x == false) && (get_layer == false)) {
           return;
+        }
       }
 
       --idx;
@@ -180,13 +185,15 @@ prevOpCode:
       if (get_layer) {
         dbVia* via = dbVia::getVia(block, data[idx]);
 
-        if (opcode & WOP_VIA_EXIT_TOP)
+        if (opcode & WOP_VIA_EXIT_TOP) {
           pnt._layer = via->getTopLayer();
-        else
+        } else {
           pnt._layer = via->getBottomLayer();
+        }
 
-        if ((look_for_x == false) && (look_for_y == false))
+        if ((look_for_x == false) && (look_for_y == false)) {
           return;
+        }
 
         get_layer = false;
       }
@@ -199,13 +206,15 @@ prevOpCode:
       if (get_layer) {
         dbTechVia* via = dbTechVia::getTechVia(tech, data[idx]);
 
-        if (opcode & WOP_VIA_EXIT_TOP)
+        if (opcode & WOP_VIA_EXIT_TOP) {
           pnt._layer = via->getTopLayer();
-        else
+        } else {
           pnt._layer = via->getBottomLayer();
+        }
 
-        if ((look_for_x == false) && (look_for_y == false))
+        if ((look_for_x == false) && (look_for_y == false)) {
           return;
+        }
 
         get_layer = false;
       }

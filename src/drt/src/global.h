@@ -26,22 +26,30 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GLOBAL_H_
-#define _GLOBAL_H_
+#pragma once
 
+#include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "frBaseTypes.h"
 #include "db/obj/frMarker.h"
+#include "frBaseTypes.h"
 
-extern std::string GUIDE_FILE;
-extern std::string OUTGUIDE_FILE;
+namespace odb {
+class Point;
+class Rect;
+}  // namespace odb
+
+namespace drt {
+
 extern std::string DBPROCESSNODE;
 extern std::string OUT_MAZE_FILE;
 extern std::string DRC_RPT_FILE;
+extern std::optional<int> DRC_RPT_ITER_STEP;
 extern std::string CMAP_FILE;
+extern std::string GUIDE_REPORT_FILE;
 // to be removed
 extern int OR_SEED;
 extern double OR_K;
@@ -61,19 +69,22 @@ extern bool USENONPREFTRACKS;
 extern bool USEMINSPACING_OBS;
 extern bool ENABLE_BOUNDARY_MAR_FIX;
 extern bool ENABLE_VIA_GEN;
-// extern int TEST;
+extern bool CLEAN_PATCHES;
+extern bool DO_PA;
+extern bool SINGLE_STEP_DR;
+extern bool SAVE_GUIDE_UPDATES;
 extern std::string VIAINPIN_BOTTOMLAYER_NAME;
 extern std::string VIAINPIN_TOPLAYER_NAME;
-extern fr::frLayerNum VIAINPIN_BOTTOMLAYERNUM;
-extern fr::frLayerNum VIAINPIN_TOPLAYERNUM;
-extern fr::frLayerNum VIAONLY_STDCELLPIN_BOTTOMLAYERNUM;
-extern fr::frLayerNum VIAONLY_STDCELLPIN_TOPLAYERNUM;
+extern frLayerNum VIAINPIN_BOTTOMLAYERNUM;
+extern frLayerNum VIAINPIN_TOPLAYERNUM;
 
-extern fr::frLayerNum VIA_ACCESS_LAYERNUM;
+extern frLayerNum VIA_ACCESS_LAYERNUM;
 
 extern int MINNUMACCESSPOINT_MACROCELLPIN;
 extern int MINNUMACCESSPOINT_STDCELLPIN;
 extern int ACCESS_PATTERN_END_ITERATION_NUM;
+extern float CONGESTION_THRESHOLD;
+extern int MAX_CLIPSIZE_INCREASE;
 
 extern int END_ITERATION;
 
@@ -85,90 +96,81 @@ extern int TAPERBOX_RADIUS;
 extern int NDR_NETS_ABS_PRIORITY;
 extern int CLOCK_NETS_ABS_PRIORITY;
 
-extern fr::frUInt4 TAVIACOST;
-extern fr::frUInt4 TAPINCOST;
-extern fr::frUInt4 TAALIGNCOST;
-extern fr::frUInt4 TADRCCOST;
+extern frUInt4 TAPINCOST;
+extern frUInt4 TAALIGNCOST;
+extern frUInt4 TADRCCOST;
 extern float TASHAPEBLOATWIDTH;
 
-extern fr::frUInt4 VIACOST;
+extern frUInt4 VIACOST;
 
-extern fr::frUInt4 GRIDCOST;
-extern fr::frUInt4 FIXEDSHAPECOST;
-extern fr::frUInt4 ROUTESHAPECOST;
-extern fr::frUInt4 MARKERCOST;
-extern fr::frUInt4 MARKERBLOATWIDTH;
-extern fr::frUInt4 BLOCKCOST;
-extern fr::frUInt4 GUIDECOST;
-extern float MARKERDECAY;
+extern frUInt4 GRIDCOST;
+extern frUInt4 ROUTESHAPECOST;
+extern frUInt4 MARKERCOST;
+extern frUInt4 MARKERBLOATWIDTH;
+extern frUInt4 BLOCKCOST;
+extern frUInt4 GUIDECOST;
 extern float SHAPEBLOATWIDTH;
-extern int MISALIGNMENTCOST;
 
 // GR
 extern int HISTCOST;
 extern int CONGCOST;
 
-#define DIRBITSIZE 3
-#define WAVEFRONTBUFFERSIZE 2
-#define WAVEFRONTBITSIZE (WAVEFRONTBUFFERSIZE * DIRBITSIZE)
-#define WAVEFRONTBUFFERHIGHMASK \
-  (111 << ((WAVEFRONTBUFFERSIZE - 1) * DIRBITSIZE))
+extern std::string REPAIR_PDN_LAYER_NAME;
+extern frLayerNum REPAIR_PDN_LAYER_NUM;
+extern frLayerNum GC_IGNORE_PDN_LAYER_NUM;
+
+constexpr int DIRBITSIZE = 3;
+constexpr int WAVEFRONTBUFFERSIZE = 2;
+constexpr int WAVEFRONTBITSIZE = (WAVEFRONTBUFFERSIZE * DIRBITSIZE);
+constexpr int WAVEFRONTBUFFERHIGHMASK
+    = (111 << ((WAVEFRONTBUFFERSIZE - 1) * DIRBITSIZE));
 
 // GR
-#define GRWAVEFRONTBUFFERSIZE 2
-#define GRWAVEFRONTBITSIZE (GRWAVEFRONTBUFFERSIZE * DIRBITSIZE)
-#define GRWAVEFRONTBUFFERHIGHMASK \
-  (111 << ((GRWAVEFRONTBUFFERSIZE - 1) * DIRBITSIZE))
+constexpr int GRWAVEFRONTBUFFERSIZE = 2;
+constexpr int GRWAVEFRONTBITSIZE = (GRWAVEFRONTBUFFERSIZE * DIRBITSIZE);
+constexpr int GRWAVEFRONTBUFFERHIGHMASK
+    = (111 << ((GRWAVEFRONTBUFFERSIZE - 1) * DIRBITSIZE));
 
-namespace odb {
-class Point;
-class Rect;
-}
-
-namespace fr {
-frCoord getGCELLGRIDX();
-frCoord getGCELLGRIDY();
-frCoord getGCELLOFFSETX();
-frCoord getGCELLOFFSETY();
-
-class frViaDef;
+class drConnFig;
+class drNet;
+class frBPin;
+class frBTerm;
 class frBlock;
+class frBlockObject;
+class frConnFig;
+class frGuide;
 class frInst;
 class frInstTerm;
-class frTerm;
-class frPin;
-class frRect;
-class frPolygon;
+class frMTerm;
+class frMaster;
 class frNet;
-class drNet;
-class drConnFig;
-class frShape;
-class frConnFig;
 class frPathSeg;
-class frGuide;
-class frBlockObject;
+class frPin;
+class frPolygon;
+class frRect;
+class frShape;
+class frTerm;
+class frViaDef;
 
 // These need to be in the fr namespace to support argument-dependent
 // lookup
-std::ostream& operator<<(std::ostream& os, const fr::frViaDef& viaDefIn);
-std::ostream& operator<<(std::ostream& os, const fr::frBlock& blockIn);
-std::ostream& operator<<(std::ostream& os, const fr::frInst& instIn);
-std::ostream& operator<<(std::ostream& os, const fr::frInstTerm& instTermIn);
-std::ostream& operator<<(std::ostream& os, const fr::frTerm& termIn);
-std::ostream& operator<<(std::ostream& os, const fr::frPin& pinIn);
-std::ostream& operator<<(std::ostream& os, const fr::frRect& pinFig);
-std::ostream& operator<<(std::ostream& os, const fr::frPolygon& pinFig);
-std::ostream& operator<<(std::ostream& os, const odb::Point& pIn);
-std::ostream& operator<<(std::ostream& os, const odb::Rect& box);
-std::ostream& operator<<(std::ostream& os, const fr::drConnFig& fig);
+std::ostream& operator<<(std::ostream& os, const frViaDef& viaDefIn);
+std::ostream& operator<<(std::ostream& os, const frBlock& blockIn);
+std::ostream& operator<<(std::ostream& os, const frInst& instIn);
+std::ostream& operator<<(std::ostream& os, const frInstTerm& instTermIn);
+std::ostream& operator<<(std::ostream& os, const frBTerm& termIn);
+std::ostream& operator<<(std::ostream& os, const frRect& pinFig);
+std::ostream& operator<<(std::ostream& os, const frPolygon& pinFig);
+std::ostream& operator<<(std::ostream& os, const drConnFig& fig);
 std::ostream& operator<<(std::ostream& os, const frShape& fig);
 std::ostream& operator<<(std::ostream& os, const frConnFig& fig);
-std::ostream& operator<<(std::ostream& os, const frPathSeg& fig);
+std::ostream& operator<<(std::ostream& os, const frPathSeg& p);
 std::ostream& operator<<(std::ostream& os, const frGuide& p);
 std::ostream& operator<<(std::ostream& os, const frBlockObject& fig);
-std::ostream& operator<<(std::ostream& os, const frNet& fig);
+std::ostream& operator<<(std::ostream& os, const frNet& n);
 std::ostream& operator<<(std::ostream& os, const drNet& n);
 std::ostream& operator<<(std::ostream& os, const frMarker& m);
-// namespace fr
-}  // namespace fr
-#endif
+
+using utl::format_as;
+
+}  // namespace drt

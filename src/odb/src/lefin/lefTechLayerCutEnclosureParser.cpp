@@ -29,9 +29,9 @@
 #include <string>
 
 #include "boostParser.h"
-#include "db.h"
 #include "lefLayerPropParser.h"
-#include "lefin.h"
+#include "odb/db.h"
+#include "odb/lefin.h"
 
 namespace odb {
 
@@ -40,22 +40,24 @@ lefTechLayerCutEnclosureRuleParser::lefTechLayerCutEnclosureRuleParser(lefin* l)
   lefin_ = l;
 }
 
-void lefTechLayerCutEnclosureRuleParser::parse(std::string s,
+void lefTechLayerCutEnclosureRuleParser::parse(const std::string& s,
                                                odb::dbTechLayer* layer)
 {
   std::vector<std::string> rules;
   boost::split(rules, s, boost::is_any_of(";"));
-  for (auto rule : rules) {
+  for (auto& rule : rules) {
     boost::algorithm::trim(rule);
-    if (rule.empty())
+    if (rule.empty()) {
       continue;
+    }
     rule += " ; ";
-    if (!parseSubRule(rule, layer))
+    if (!parseSubRule(rule, layer)) {
       lefin_->warning(260,
                       "parse mismatch in layer propery LEF58_ENCLOSURE for "
                       "layer {} :\"{}\"",
                       layer->getName(),
                       rule);
+    }
   }
 }
 void lefTechLayerCutEnclosureRuleParser::setCutClass(
@@ -64,14 +66,16 @@ void lefTechLayerCutEnclosureRuleParser::setCutClass(
     odb::dbTechLayer* layer)
 {
   auto cutClass = layer->findTechLayerCutClassRule(val.c_str());
-  if (cutClass == nullptr)
+  if (cutClass == nullptr) {
     lefin_->warning(
         601,
         "cut class {} not found for LEF58_ENCLOSURE rule for layer {}",
         val,
         layer->getName());
-  rule->setCutClass(cutClass);
-  rule->setCutClassValid(true);
+  } else {
+    rule->setCutClass(cutClass);
+    rule->setCutClassValid(true);
+  }
 }
 void lefTechLayerCutEnclosureRuleParser::setInt(
     double val,
@@ -83,8 +87,6 @@ void lefTechLayerCutEnclosureRuleParser::setInt(
 bool lefTechLayerCutEnclosureRuleParser::parseSubRule(std::string s,
                                                       odb::dbTechLayer* layer)
 {
-  qi::rule<std::string::iterator, std::string(), ascii::space_type> _string;
-  _string %= lexeme[+(char_ - ' ')];
   odb::dbTechLayerCutEnclosureRule* rule
       = odb::dbTechLayerCutEnclosureRule::create(layer);
   qi::rule<std::string::iterator, space_type> EOL
@@ -338,8 +340,9 @@ bool lefTechLayerCutEnclosureRuleParser::parseSubRule(std::string s,
   auto first = s.begin();
   auto last = s.end();
   bool valid = qi::phrase_parse(first, last, ENCLOSURE, space) && first == last;
-  if (!valid)
+  if (!valid) {
     odb::dbTechLayerCutEnclosureRule::destroy(rule);
+  }
   return valid;
 }
 

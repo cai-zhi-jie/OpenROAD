@@ -26,20 +26,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_REF_H_
-#define _FR_REF_H_
+#pragma once
 
-#include "odb/dbTypes.h"
 #include "db/obj/frFig.h"
+#include "odb/dbTypes.h"
 
-namespace fr {
+namespace drt {
 class frRef : public frPinFig
 {
  public:
   // getters
   virtual dbOrientType getOrient() const = 0;
-  virtual void getOrigin(Point& tmpOrigin) const = 0;
-  virtual void getTransform(dbTransform& xform) const = 0;
+  virtual Point getOrigin() const = 0;
+  virtual dbTransform getTransform() const = 0;
   // setters
   virtual void setOrient(const dbOrientType& tmpOrient) = 0;
   virtual void setOrigin(const Point& tmpPoint) = 0;
@@ -47,7 +46,7 @@ class frRef : public frPinFig
 
  protected:
   // constructors
-  frRef() : frPinFig() {}
+  frRef() = default;
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -57,6 +56,4 @@ class frRef : public frPinFig
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

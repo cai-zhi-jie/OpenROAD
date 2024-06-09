@@ -26,43 +26,31 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_BLOCKAGE_H_
-#define _FR_BLOCKAGE_H_
+#pragma once
 
 #include <memory>
 
-#include "db/obj/frPin.h"
+#include "db/obj/frBPin.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class frBlockage : public frBlockObject
 {
  public:
-  // constructors
-  frBlockage() : frBlockObject(), pin_(nullptr), design_rule_width_(-1) {}
   // getters
-  frPin* getPin() const { return pin_.get(); }
+  frBPin* getPin() const { return pin_.get(); }
   frCoord getDesignRuleWidth() const { return design_rule_width_; }
   // setters
-  void setPin(std::unique_ptr<frPin> in) { pin_ = std::move(in); }
+  void setPin(std::unique_ptr<frBPin> in) { pin_ = std::move(in); }
   void setDesignRuleWidth(frCoord width) { design_rule_width_ = width; }
   // others
   frBlockObjectEnum typeId() const override { return frcBlockage; }
+  void setIndexInOwner(int in) { index_in_owner_ = in; }
+  int getIndexInOwner() const { return index_in_owner_; }
 
  private:
-  std::unique_ptr<frPin> pin_;
-  frCoord design_rule_width_;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & pin_;
-    (ar) & design_rule_width_;
-  }
-
-  friend class boost::serialization::access;
+  std::unique_ptr<frBPin> pin_;
+  frCoord design_rule_width_{-1};
+  int index_in_owner_{0};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

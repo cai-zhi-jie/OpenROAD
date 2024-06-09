@@ -33,9 +33,9 @@
 #pragma once
 
 #include "dbCore.h"
-#include "dbId.h"
-#include "dbTypes.h"
-#include "odb.h"
+#include "odb/dbId.h"
+#include "odb/dbTypes.h"
+#include "odb/odb.h"
 
 namespace odb {
 
@@ -75,6 +75,9 @@ class _dbSWire : public _dbObject
   }
 
   ~_dbSWire() {}
+
+  void addSBox(_dbSBox* box);
+  void removeSBox(_dbSBox* box);
 
   bool operator==(const _dbSWire& rhs) const;
   bool operator!=(const _dbSWire& rhs) const { return !operator==(rhs); }

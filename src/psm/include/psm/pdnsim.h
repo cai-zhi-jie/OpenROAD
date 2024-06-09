@@ -31,61 +31,122 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef __PDNSim_HEADER__
-#define __PDNSim_HEADER__
+#pragma once
 
-#include <string>
 #include <map>
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "odb/dbBlockCallBackObj.h"
 
 namespace odb {
 class dbDatabase;
-}
+class Point;
+class dbNet;
+class dbTechLayer;
+}  // namespace odb
+
 namespace sta {
 class dbSta;
-}
+class Corner;
+}  // namespace sta
 namespace utl {
 class Logger;
 }
+namespace rsz {
+class Resizer;
+}
 
 namespace psm {
+class IRDropDataSource;
+class IRSolver;
 
-class PDNSim
+enum class GeneratedSourceType
+{
+  FULL,
+  STRAPS,
+  BUMPS
+};
+
+class PDNSim : public odb::dbBlockCallBackObj
 {
  public:
+  struct GeneratedSourceSettings
+  {
+    // Bumps
+    int bump_dx = 140;
+    int bump_dy = 140;
+    int bump_size = 70;
+    int bump_interval = 3;
+
+    // Straps
+    int strap_track_pitch = 10;
+  };
+
+  using IRDropByPoint = std::map<odb::Point, double>;
+  using IRDropByLayer = std::map<odb::dbTechLayer*, IRDropByPoint>;
+
   PDNSim();
-  ~PDNSim();
+  ~PDNSim() override;
 
-  void init(utl::Logger* logger, odb::dbDatabase* db, sta::dbSta* sta);
-  void reset();
+  void init(utl::Logger* logger,
+            odb::dbDatabase* db,
+            sta::dbSta* sta,
+            rsz::Resizer* resizer);
 
-  void import_vsrc_cfg(std::string vsrc);
-  void import_out_file(std::string out_file);
-  void import_em_out_file(std::string em_out_file);
-  void import_enable_em(int enable_em);
-  void import_spice_out_file(std::string out_file);
-  void set_power_net(std::string net);
-  void set_bump_pitch_x(float bump_pitch);
-  void set_bump_pitch_y(float bump_pitch);
-  void set_pdnsim_net_voltage(std::string net, float voltage);
-  int  analyze_power_grid();
-  void write_pg_spice();
+  void setNetVoltage(odb::dbNet* net, sta::Corner* corner, double voltage);
+  void analyzePowerGrid(odb::dbNet* net,
+                        sta::Corner* corner,
+                        GeneratedSourceType source_type,
+                        const std::string& voltage_file,
+                        bool enable_em,
+                        const std::string& em_file,
+                        const std::string& error_file,
+                        const std::string& voltage_source_file);
+  void writeSpiceNetwork(odb::dbNet* net,
+                         sta::Corner* corner,
+                         GeneratedSourceType source_type,
+                         const std::string& spice_file,
+                         const std::string& voltage_source_file);
+  void getIRDropForLayer(odb::dbNet* net,
+                         sta::Corner* corner,
+                         odb::dbTechLayer* layer,
+                         IRDropByPoint& ir_drop) const;
+  bool checkConnectivity(odb::dbNet* net,
+                         bool floorplanning,
+                         const std::string& error_file);
+  void setDebugGui(bool enable);
 
-  int check_connectivity();
+  void clearSolvers();
+
+  void setGeneratedSourceSettings(const GeneratedSourceSettings& settings);
+
+  // from dbBlockCallBackObj
+  void inDbPostMoveInst(odb::dbInst*) override;
+  void inDbNetDestroy(odb::dbNet*) override;
+  void inDbBTermPostConnect(odb::dbBTerm*) override;
+  void inDbBTermPostDisConnect(odb::dbBTerm*, odb::dbNet*) override;
+  void inDbBPinDestroy(odb::dbBPin*) override;
+  void inDbSWireAddSBox(odb::dbSBox*) override;
+  void inDbSWireRemoveSBox(odb::dbSBox*) override;
+  void inDbSWirePostDestroySBoxes(odb::dbSWire*) override;
 
  private:
-  odb::dbDatabase*             _db;
-  sta::dbSta*                  _sta;
-  utl::Logger*                 _logger;
-  std::string                  _vsrc_loc;
-  std::string                  _out_file;
-  std::string                  _em_out_file;
-  int                          _enable_em;
-  int                          _bump_pitch_x;
-  int                          _bump_pitch_y;
-  std::string                  _spice_out_file;
-  std::string                  _power_net;
-  std::map<std::string, float> _net_voltage_map;
+  IRSolver* getIRSolver(odb::dbNet* net, bool floorplanning);
+
+  odb::dbDatabase* db_ = nullptr;
+  sta::dbSta* sta_ = nullptr;
+  rsz::Resizer* resizer_ = nullptr;
+  utl::Logger* logger_ = nullptr;
+
+  std::unique_ptr<IRDropDataSource> heatmap_;
+
+  bool debug_gui_enabled_ = false;
+
+  GeneratedSourceSettings generated_source_settings_;
+
+  std::map<odb::dbNet*, std::unique_ptr<IRSolver>> solvers_;
+  std::map<odb::dbNet*, std::map<sta::Corner*, double>> user_voltages_;
 };
 }  // namespace psm
-
-#endif

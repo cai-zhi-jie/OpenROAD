@@ -1,4 +1,4 @@
-add_library(odb
+add_library(db
     dbBTerm.cpp 
     dbStream.cpp 
     dbBTermItr.cpp 
@@ -19,7 +19,6 @@ add_library(odb
     dbMTerm.cpp 
     dbMaster.cpp 
     dbNet.cpp 
-    dbSearch.cpp
     dbTech.cpp  
     dbTechLayerSpacingRule.cpp 
     dbTechLayerAntennaRule.cpp 
@@ -49,8 +48,6 @@ add_library(odb
     dbWirePathItr.cpp 
     dbTarget.cpp 
     dbTargetItr.cpp 
-    test_wire.cpp 
-    test_wire2.cpp 
     dbTechNonDefaultRule.cpp 
     dbTechLayerRule.cpp 
     dbCapNode.cpp 
@@ -65,14 +62,12 @@ add_library(odb
     dbJournal.cpp 
     dbJournalLog.cpp 
     dbBlockCallBackObj.cpp 
-    dbRtTree.cpp 
     dbRegion.cpp 
     dbRegionInstItr.cpp 
     dbExtControl.cpp 
     dbNullIterator.cpp 
     dbBPin.cpp 
     dbHierInstShapeItr.cpp 
-    dbRegionItr.cpp 
     dbHier.cpp 
     dbTechViaRule.cpp 
     dbTechViaLayerRule.cpp 
@@ -81,11 +76,6 @@ add_library(odb
     dbNameCache.cpp 
     dbProperty.cpp 
     dbPropertyItr.cpp 
-    dbFlatten.cpp 
-    dbUtil.cpp
-    gs.cpp
-    grids.cpp
-    dbLogger.cpp 
     tmg_conn.cpp
     tmg_conn_g.cpp
     tmg_conn_s.cpp
@@ -94,57 +84,87 @@ add_library(odb
     dbGroupPowerNetItr.cpp
     dbGroupGroundNetItr.cpp
     # Generator Code Begin cpp
-    dbTechLayer.cpp
-    dbTechLayerSpacingEolRule.cpp
-    dbTechLayerMinStepRule.cpp
-    dbTechLayerCornerSpacingRule.cpp
-    dbTechLayerSpacingTablePrlRule.cpp
-    dbTechLayerEolKeepOutRule.cpp
-    dbTechLayerCutClassRule.cpp
-    dbTechLayerCutSpacingRule.cpp
-    dbTechLayerCutSpacingTableOrthRule.cpp
-    dbTechLayerCutSpacingTableDefRule.cpp
-    dbTechLayerCutEnclosureRule.cpp
-    dbTechLayerEolExtensionRule.cpp
-    dbModule.cpp
-    dbModInst.cpp
-    dbGroup.cpp
+    dbAccessPoint.cpp
+    dbDft.cpp
     dbGCellGrid.cpp
-    dbModuleInstItr.cpp
-    dbModuleModInstItr.cpp
-    dbGroupModInstItr.cpp
-    dbGroupItr.cpp
+    dbGlobalConnect.cpp
+    dbGroup.cpp
+    dbGuide.cpp
+    dbIsolation.cpp
+    dbLevelShifter.cpp
+    dbLogicPort.cpp
+    dbMetalWidthViaMap.cpp
+    dbModBTerm.cpp
+    dbModInst.cpp
+    dbModITerm.cpp
+    dbModNet.cpp
+    dbModule.cpp
+    dbNetTrack.cpp
+    dbPowerDomain.cpp
+    dbPowerSwitch.cpp
+    dbScanChain.cpp
+    dbScanInst.cpp
+    dbScanList.cpp
+    dbScanPartition.cpp
+    dbScanPin.cpp
+    dbTechLayer.cpp
+    dbTechLayerAreaRule.cpp
+    dbTechLayerArraySpacingRule.cpp
+    dbTechLayerCornerSpacingRule.cpp
+    dbTechLayerCutClassRule.cpp
+    dbTechLayerCutEnclosureRule.cpp
+    dbTechLayerCutSpacingRule.cpp
+    dbTechLayerCutSpacingTableDefRule.cpp
+    dbTechLayerCutSpacingTableOrthRule.cpp
+    dbTechLayerEolExtensionRule.cpp
+    dbTechLayerEolKeepOutRule.cpp
+    dbTechLayerForbiddenSpacingRule.cpp
+    dbTechLayerKeepOutZoneRule.cpp
+    dbTechLayerMinCutRule.cpp
+    dbTechLayerMinStepRule.cpp
+    dbTechLayerSpacingEolRule.cpp
+    dbTechLayerSpacingTablePrlRule.cpp
+    dbTechLayerTwoWiresForbiddenSpcRule.cpp
+    dbTechLayerWidthTableRule.cpp
+    dbTechLayerWrongDirSpacingRule.cpp
     dbGroupInstItr.cpp
+    dbGroupItr.cpp
+    dbGroupModInstItr.cpp
+    dbGuideItr.cpp
+    dbModuleInstItr.cpp
+    dbModuleModBTermItr.cpp
+    dbModuleModInstItr.cpp
+    dbModuleModInstModITermItr.cpp
+    dbModuleModNetBTermItr.cpp
+    dbModuleModNetITermItr.cpp
+    dbModuleModNetItr.cpp
+    dbModuleModNetModBTermItr.cpp
+    dbModuleModNetModITermItr.cpp
+    dbNetTrackItr.cpp
+    dbRegionGroupItr.cpp
     # Generator Code End cpp
 )
 
-target_include_directories(odb
+target_include_directories(db
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
         ${TCL_INCLUDE_PATH}
 )
 
-set_target_properties(odb
+set_target_properties(db
   PROPERTIES
     # python requirement
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_link_libraries(odb
+target_link_libraries(db
     PUBLIC
-        cdl
-        defin
-        defout
-        lefin
-        lefout
-        tm
-        zlib 
         zutil
-        utl
+        utl_lib
         ${TCL_LIBRARY}
 )
 
 messages(
-  TARGET odb
+  TARGET db
   OUTPUT_DIR ../..
 )

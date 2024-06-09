@@ -30,7 +30,7 @@
 
 #include "db/obj/frInst.h"
 
-using namespace fr;
+namespace drt {
 
 frString frInstTerm::getName() const
 {
@@ -39,9 +39,8 @@ frString frInstTerm::getName() const
 
 frAccessPoint* frInstTerm::getAccessPoint(frCoord x, frCoord y, frLayerNum lNum)
 {
-  dbTransform shiftXform;
   auto inst = getInst();
-  inst->getTransform(shiftXform);
+  dbTransform shiftXform = inst->getTransform();
   Point offset(shiftXform.getOffset());
   x = x - offset.getX();
   y = y - offset.getY();
@@ -59,20 +58,26 @@ void frInstTerm::getShapes(std::vector<frRect>& outShapes,
   term_->getShapes(outShapes);
   for (auto& shape : outShapes) {
     dbTransform trans;
-    if (updatedTransform)
-      getInst()->getUpdatedXform(trans);
-    else
-      getInst()->getTransform(trans);
+    if (updatedTransform) {
+      trans = getInst()->getUpdatedXform();
+    } else {
+      trans = getInst()->getTransform();
+    }
     shape.move(trans);
   }
 }
 
-Rect frInstTerm::getBBox()
+Rect frInstTerm::getBBox(bool updatedTransform)
 {
   Rect bbox(term_->getBBox());
   dbTransform trans;
-  getInst()->getTransform(trans);
-  Point offset = trans.getOffset();
-  bbox.moveDelta(offset.getX(), offset.getY());
+  if (updatedTransform) {
+    trans = getInst()->getUpdatedXform();
+  } else {
+    trans = getInst()->getTransform();
+  }
+  trans.apply(bbox);
   return bbox;
 }
+
+}  // namespace drt

@@ -1,6 +1,6 @@
 record_tests {
   gcd_restructure
-  #const_cell_removal
+  const_cell_removal
   blif_writer
   blif_writer_input_output
   blif_writer_consts
@@ -9,4 +9,6 @@ record_tests {
   blif_reader
   blif_reader_const
   blif_reader_sequential
+  #rmp_man_tcl_check
+  #rmp_readme_msgs_check
 }

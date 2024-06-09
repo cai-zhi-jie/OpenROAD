@@ -32,12 +32,16 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 #############################################################################
 
-sta::define_cmd_args "detailed_placement" {[-max_displacement disp|{disp_x disp_y}]}
+sta::define_cmd_args "detailed_placement" { \
+                           [-max_displacement disp|{disp_x disp_y}] \
+                           [-disallow_one_site_gaps] \
+                           [-report_file_name file_name]}
 
 proc detailed_placement { args } {
   sta::parse_key_args "detailed_placement" args \
-    keys {-max_displacement} flags {}
+    keys {-max_displacement -report_file_name} flags {-disallow_one_site_gaps}
 
+  set disallow_one_site_gaps [info exists flags(-disallow_one_site_gaps)]
   if { [info exists keys(-max_displacement)] } {
     set max_displacement $keys(-max_displacement)
     if { [llength $max_displacement] == 1 } {
@@ -56,6 +60,10 @@ proc detailed_placement { args } {
     set max_displacement_x 0
     set max_displacement_y 0
   }
+  set file_name ""
+  if { [info exists keys(-report_file_name) ] } {
+    set file_name $keys(-report_file_name)
+  }
 
   sta::check_argc_eq0 "detailed_placement" $args
   if { [ord::db_has_rows] } {
@@ -65,7 +73,8 @@ proc detailed_placement { args } {
                               / [$site getWidth]]
     set max_displacement_y [expr [ord::microns_to_dbu $max_displacement_y] \
                               / [$site getHeight]]
-    dpl::detailed_placement_cmd $max_displacement_x $max_displacement_y
+    dpl::detailed_placement_cmd $max_displacement_x $max_displacement_y \
+      $disallow_one_site_gaps $file_name
     dpl::report_legalization_stats
   } else {
     utl::error "DPL" 27 "no rows defined in design. Use initialize_floorplan to add rows."
@@ -116,31 +125,60 @@ sta::define_cmd_args "filler_placement" { [-prefix prefix] filler_masters }
 proc filler_placement { args } {
   sta::parse_key_args "filler_placement" args \
     keys {-prefix} flags {}
-  
+
   set prefix "FILLER_"
   if { [info exists keys(-prefix)] } {
     set prefix $keys(-prefix)
   }
-  
+
   sta::check_argc_eq1 "filler_placement" $args
   set filler_masters [dpl::get_masters_arg "filler_masters" [lindex $args 0]]
   dpl::filler_placement_cmd $filler_masters $prefix
 }
 
-sta::define_cmd_args "check_placement" {[-verbose]}
+sta::define_cmd_args "remove_fillers" {}
+
+proc remove_fillers { args } {
+  sta::parse_key_args "remove_fillers" args keys {} flags {}
+  sta::check_argc_eq0 "remove_fillers" $args
+  if { [ord::get_db_block] == "NULL" } {
+    utl::error DPL 105 "No design block found."
+  }
+  dpl::remove_fillers_cmd
+}
+
+sta::define_cmd_args "check_placement" {[-verbose] \
+                                        [-disallow_one_site_gaps] \
+                                        [-report_file_name file_name]}
 
 proc check_placement { args } {
-  sta::parse_key_args "check_placement" args \
-    keys {} flags {-verbose}
 
+  if { [ord::get_db_block] == "NULL" } {
+    utl::error DPL 103 "No design block found."
+  }
+
+  sta::parse_key_args "check_placement" args \
+    keys {-report_file_name} flags {-verbose -disallow_one_site_gaps}
   set verbose [info exists flags(-verbose)]
+  set disallow_one_site_gaps [info exists flags(-disallow_one_site_gaps)]
   sta::check_argc_eq0 "check_placement" $args
-  dpl::check_placement_cmd $verbose
+  set file_name ""
+  if { [info exists keys(-report_file_name) ] } {
+    set file_name $keys(-report_file_name)
+  }
+  dpl::check_placement_cmd $verbose $disallow_one_site_gaps $file_name
 }
 
 sta::define_cmd_args "optimize_mirroring" {}
 
 proc optimize_mirroring { args } {
+
+  sta::parse_key_args "optimize_mirroring" args keys {} flags {}
+
+  if { [ord::get_db_block] == "NULL" } {
+    utl::error DPL 104 "No design block found."
+  }
+
   sta::check_argc_eq0 "optimize_mirroring" $args
   dpl::optimize_mirroring_cmd
 }
@@ -150,50 +188,52 @@ namespace eval dpl {
 # min_displacement is the smallest displacement to draw
 # measured as a multiple of row_height.
 proc detailed_placement_debug { args } {
-  sta::parse_key_args "global_placement_debug" args \
-      keys {-instance -min_displacement} \
-      flags {-displacement}
+  sta::parse_key_args "detailed_placement_debug" args \
+    keys {-instance -min_displacement}
 
-  set displacement [info exists flags(-displacement)]
 
   if { [info exists keys(-min_displacement)] } {
     set min_displacement $keys(-min_displacement)
   } else {
-      set min_displacement 0
+    set min_displacement 0
   }
 
   if { [info exists keys(-instance)] } {
-      set instance_name $keys(-instance)
-      set block [ord::get_db_block]
-      set debug_instance [$block findInst $instance_name]
-      if {$debug_instance == "NULL"} {
-          utl::error DPL 32 "Debug instance $instance_name not found."
-      }
+    set instance_name $keys(-instance)
+    set block [ord::get_db_block]
+    set debug_instance [$block findInst $instance_name]
+    if {$debug_instance == "NULL"} {
+      utl::error DPL 32 "Debug instance $instance_name not found."
+    }
   } else {
-      set debug_instance "NULL"
+    set debug_instance "NULL"
   }
 
-  dpl::set_debug_cmd $displacement $min_displacement $debug_instance
+  dpl::set_debug_cmd $min_displacement $debug_instance
 }
 
 proc get_masters_arg { arg_name arg } {
-  set matched 0
   set masters {}
   # Expand master name regexps
   set db [ord::get_db]
   foreach name $arg {
+    set matched 0
     foreach lib [$db getLibs] {
       foreach master [$lib getMasters] {
         set master_name [$master getConstName]
-        if { [regexp $name $master_name] } {
+        if { [string match $name $master_name] } {
           lappend masters $master
           set matched 1
         }
       }
     }
+    if { !$matched } {
+      utl::warn "DPL" 28 "$name did not match any masters."
+    }
   }
-  if { !$matched } {
-    utl::warn "DPL" 28 "$name did not match any masters."
+  if { [llength $arg] > 0 && [llength $masters] == 0 } {
+    utl::error "DPL" 39 "\"$arg\" did not match any masters.
+This could be due to a change from using regex to glob to search for cell masters. https://github.com/The-OpenROAD-Project/OpenROAD/pull/3210"
   }
   return $masters
 }
@@ -218,7 +258,8 @@ proc get_inst_grid_bbox { inst_name } {
   set height [$site getHeight]
   if { $inst != "NULL" } {
     set bbox [$inst getBBox]
-    return "[format_grid [$bbox xMin] $width] [format_grid [$bbox yMin] $height] [format_grid [$bbox xMax] $width] [format_grid [$bbox yMax] $height]"
+    return "[format_grid [$bbox xMin] $width] [format_grid [$bbox yMin] $height]\
+            [format_grid [$bbox xMax] $width] [format_grid [$bbox yMax] $height]"
   } else {
     utl::error "DPL" 30 "cannot find instance $inst_name"
   }

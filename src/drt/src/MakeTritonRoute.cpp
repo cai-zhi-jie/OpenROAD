@@ -38,24 +38,23 @@
 
 namespace ord {
 
-triton_route::TritonRoute* makeTritonRoute()
+drt::TritonRoute* makeTritonRoute()
 {
-  return new triton_route::TritonRoute();
+  return new drt::TritonRoute();
 }
 
-void deleteTritonRoute(triton_route::TritonRoute* router)
+void deleteTritonRoute(drt::TritonRoute* router)
 {
   delete router;
 }
 
 void initTritonRoute(OpenRoad* openroad)
 {
-  openroad->getTritonRoute()->init(
-      openroad->tclInterp(),
-      openroad->getDb(),
-      openroad->getLogger(),
-      openroad->getDistributed(),
-      openroad->getSteinerTreeBuilder());
+  openroad->getTritonRoute()->init(openroad->tclInterp(),
+                                   openroad->getDb(),
+                                   openroad->getLogger(),
+                                   openroad->getDistributed(),
+                                   openroad->getSteinerTreeBuilder());
 }
 
 }  // namespace ord

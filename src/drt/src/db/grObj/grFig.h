@@ -26,25 +26,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GR_FIG_H_
-#define _GR_FIG_H_
+#pragma once
 
 #include <memory>
 
 #include "db/grObj/grBlockObject.h"
 #include "db/infra/frBox.h"
 
-namespace fr {
+namespace drt {
+
 class grFig : public grBlockObject
 {
  public:
-  // constructors
-  grFig() : grBlockObject() {}
-  // getters
-  virtual void getBBox(Rect& box) const = 0;
-  // setters
-  // others
- protected:
+  virtual Rect getBBox() const = 0;
 };
 
 class frNet;
@@ -54,8 +48,6 @@ class grNode;
 class grConnFig : public grFig
 {
  public:
-  // constructors
-  grConnFig() : grFig() {}
   // getters
   virtual bool hasNet() const = 0;
   virtual frNet* getNet() const = 0;
@@ -84,7 +76,6 @@ class grPin;
 class grPinFig : public grConnFig
 {
  public:
-  grPinFig() : grConnFig() {}
   // getters
   virtual bool hasPin() const = 0;
   virtual grPin* getPin() const = 0;
@@ -105,8 +96,6 @@ class grPinFig : public grConnFig
    * move
    * overlaps
    */
- protected:
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

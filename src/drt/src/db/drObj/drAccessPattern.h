@@ -26,131 +26,38 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DR_ACCESS_PATTERN_H
-#define _DR_ACCESS_PATTERN_H
+#pragma once
 
 #include "db/drObj/drBlockObject.h"
 #include "db/infra/frPoint.h"
 #include "dr/FlexMazeTypes.h"
 
-namespace fr {
+namespace drt {
+
 class drPin;
 class frViaDef;
+
 class drAccessPattern : public drBlockObject
 {
  public:
-  drAccessPattern()
-      : beginPoint_(),
-        beginLayerNum_(0),
-        beginArea_(0),
-        pin_(nullptr),
-        validAccess_(std::vector<bool>(6, true)),
-        vU_(nullptr),
-        vD_(nullptr),
-        vUIdx_(0),
-        vDIdx_(0),
-        onTrackX_(true),
-        onTrackY_(true),
-        pinCost_(0)
-  {
-  }
   // getters
-  void getPoint(Point& bpIn) const { bpIn = beginPoint_; }
-  const Point& getPoint() const { return beginPoint_; }
+  Point getPoint() const { return beginPoint_; }
   frLayerNum getBeginLayerNum() const { return beginLayerNum_; }
   frCoord getBeginArea() const { return beginArea_; }
   drPin* getPin() const { return pin_; }
   bool hasMazeIdx() const { return (!mazeIdx_.empty()); }
-  void getMazeIdx(FlexMazeIdx& in) const { in.set(mazeIdx_); }
-  bool hasValidAccess(const frDirEnum& dir)
-  {
-    switch (dir) {
-      case (frDirEnum::E):
-        return validAccess_[0];
-        break;
-      case (frDirEnum::S):
-        return validAccess_[1];
-        break;
-      case (frDirEnum::W):
-        return validAccess_[2];
-        break;
-      case (frDirEnum::N):
-        return validAccess_[3];
-        break;
-      case (frDirEnum::U):
-        return validAccess_[4];
-        break;
-      case (frDirEnum::D):
-        return validAccess_[5];
-        break;
-      default:
-        return false;
-    }
-  }
+  FlexMazeIdx getMazeIdx() const { return mazeIdx_; }
+  bool hasValidAccess(const frDirEnum& dir);
   bool hasAccessViaDef(const frDirEnum& dir = frDirEnum::U)
   {
-    if (dir == frDirEnum::U) {
-      return !(vU_ == nullptr);
-    } else {
-      return !(vD_ == nullptr);
-    }
+    return (dir == frDirEnum::U) ? vU_ : vD_;
   }
   frViaDef* getAccessViaDef(const frDirEnum& dir = frDirEnum::U)
   {
-    if (dir == frDirEnum::U) {
-      return (*vU_)[vUIdx_];
-    } else {
-      return (*vD_)[vDIdx_];
-    }
+    return (dir == frDirEnum::U) ? (*vU_)[vUIdx_] : (*vD_)[vDIdx_];
   }
-  bool nextAccessViaDef(const frDirEnum& dir = frDirEnum::U)
-  {
-    bool sol = true;
-    if (dir == frDirEnum::U) {
-      if ((*vU_).size() == 1) {
-        sol = false;
-      } else {
-        ++vUIdx_;
-        if (vUIdx_ >= (int) (*vU_).size()) {
-          vUIdx_ -= (int) (*vU_).size();
-        }
-      }
-    } else {
-      if ((*vD_).size() == 1) {
-        sol = false;
-      } else {
-        ++vDIdx_;
-        if (vDIdx_ >= (int) (*vD_).size()) {
-          vDIdx_ -= (int) (*vD_).size();
-        }
-      }
-    }
-    return sol;
-  }
-  bool prevAccessViaDef(const frDirEnum& dir = frDirEnum::U)
-  {
-    bool sol = true;
-    if (dir == frDirEnum::U) {
-      if ((*vU_).size() == 1) {
-        sol = false;
-      } else {
-        --vUIdx_;
-        if (vUIdx_ < 0) {
-          vUIdx_ += (int) (*vU_).size();
-        }
-      }
-    } else {
-      if ((*vD_).size() == 1) {
-        sol = false;
-      } else {
-        --vDIdx_;
-        if (vDIdx_ < 0) {
-          vDIdx_ += (int) (*vD_).size();
-        }
-      }
-    }
-    return sol;
-  }
+  bool nextAccessViaDef(const frDirEnum& dir = frDirEnum::U);
+  bool prevAccessViaDef(const frDirEnum& dir = frDirEnum::U);
   bool isOnTrack(bool isX) const { return (isX) ? onTrackX_ : onTrackY_; }
   frUInt4 getPinCost() const { return pinCost_; }
   // setters
@@ -184,40 +91,23 @@ class drAccessPattern : public drBlockObject
 
  protected:
   Point beginPoint_;
-  frLayerNum beginLayerNum_;
-  frCoord beginArea_;
+  frLayerNum beginLayerNum_{0};
+  frCoord beginArea_{0};
   FlexMazeIdx mazeIdx_;
-  drPin* pin_;
-  std::vector<bool> validAccess_;
-  std::vector<frViaDef*>* vU_;
-  std::vector<frViaDef*>* vD_;
-  int vUIdx_;
-  int vDIdx_;
-  bool onTrackX_;    // initialized in initMazeIdx_ap
-  bool onTrackY_;    // initialized in initMazeIdx_ap
-  frUInt4 pinCost_;  // is preferred ap
+  drPin* pin_{nullptr};
+  std::vector<bool> validAccess_ = std::vector<bool>(6, true);
+  std::vector<frViaDef*>* vU_{nullptr};
+  std::vector<frViaDef*>* vD_{nullptr};
+  int vUIdx_{0};
+  int vDIdx_{0};
+  bool onTrackX_{true};  // initialized in initMazeIdx_ap
+  bool onTrackY_{true};  // initialized in initMazeIdx_ap
+  frUInt4 pinCost_{0};   // is preferred ap
 
   template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<drBlockObject>(*this);
-    (ar) & beginPoint_;
-    (ar) & beginLayerNum_;
-    (ar) & beginArea_;
-    (ar) & mazeIdx_;
-    (ar) & pin_;
-    (ar) & validAccess_;
-    (ar) & vU_;
-    (ar) & vD_;
-    (ar) & vUIdx_;
-    (ar) & vDIdx_;
-    (ar) & onTrackX_;
-    (ar) & onTrackY_;
-    (ar) & pinCost_;
-  }
+  void serialize(Archive& ar, unsigned int version);
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

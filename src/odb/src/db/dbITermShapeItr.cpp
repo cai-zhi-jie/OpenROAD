@@ -30,19 +30,19 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#include "ZException.h"
-#include "db.h"
-#include "dbShape.h"
+#include "odb/ZException.h"
+#include "odb/db.h"
+#include "odb/dbShape.h"
 
 namespace odb {
 
 dbITermShapeItr::dbITermShapeItr(bool expand_vias)
 {
-  _mterm = NULL;
+  _mterm = nullptr;
   _state = 0;
-  _iterm = NULL;
-  _mpin = NULL;
-  _via = NULL;
+  _iterm = nullptr;
+  _mpin = nullptr;
+  _via = nullptr;
   _via_x = 0;
   _via_y = 0;
   _expand_vias = expand_vias;
@@ -53,24 +53,22 @@ void dbITermShapeItr::begin(dbITerm* iterm)
   _iterm = iterm;
   dbInst* inst = iterm->getInst();
   _mterm = iterm->getMTerm();
-  int x, y;
-  inst->getOrigin(x, y);
-  _transform = dbTransform(inst->getOrient(), Point(x, y));
+  _transform = inst->getTransform();
   _state = 0;
 }
 
 void dbITermShapeItr::getShape(dbBox* box, dbShape& shape)
 {
-  Rect r;
-  box->getBox(r);
+  Rect r = box->getBox();
   _transform.apply(r);
 
   dbTechVia* via = box->getTechVia();
 
-  if (via)
+  if (via) {
     shape.setVia(via, r);
-  else
+  } else {
     shape.setSegment(box->getTechLayer(), r);
+  }
 }
 
 #define INIT 0
@@ -93,23 +91,22 @@ next_state:
     }
 
     case MPIN_ITR: {
-      if (_mpin_itr == _mpins.end())
+      if (_mpin_itr == _mpins.end()) {
         return false;
-      else {
-        _mpin = *_mpin_itr;
-        ++_mpin_itr;
-        _boxes = _mpin->getGeometry();
-        _box_itr = _boxes.begin();
-        _state = MBOX_ITR;
       }
+      _mpin = *_mpin_itr;
+      ++_mpin_itr;
+      _boxes = _mpin->getGeometry();
+      _box_itr = _boxes.begin();
+      _state = MBOX_ITR;
 
       goto next_state;
     }
 
     case MBOX_ITR: {
-      if (_box_itr == _boxes.end())
+      if (_box_itr == _boxes.end()) {
         _state = MPIN_ITR;
-      else {
+      } else {
         dbBox* box = *_box_itr;
         ++_box_itr;
 
@@ -118,23 +115,21 @@ next_state:
           return true;
         }
 
-        else {
-          box->getViaXY(_via_x, _via_y);
-          _via = box->getTechVia();
-          assert(_via);
-          _via_boxes = _via->getBoxes();
-          _via_box_itr = _via_boxes.begin();
-          _state = VIA_BOX_ITR;
-        }
+        box->getViaXY(_via_x, _via_y);
+        _via = box->getTechVia();
+        assert(_via);
+        _via_boxes = _via->getBoxes();
+        _via_box_itr = _via_boxes.begin();
+        _state = VIA_BOX_ITR;
       }
 
       goto next_state;
     }
 
     case VIA_BOX_ITR: {
-      if (_via_box_itr == _via_boxes.end())
+      if (_via_box_itr == _via_boxes.end()) {
         _state = MBOX_ITR;
-      else {
+      } else {
         dbBox* box = *_via_box_itr;
         ++_via_box_itr;
         getViaBox(box, shape);
@@ -150,8 +145,7 @@ next_state:
 
 void dbITermShapeItr::getViaBox(dbBox* box, dbShape& shape)
 {
-  Rect b;
-  box->getBox(b);
+  Rect b = box->getBox();
   int xmin = b.xMin() + _via_x;
   int ymin = b.yMin() + _via_y;
   int xmax = b.xMax() + _via_x;

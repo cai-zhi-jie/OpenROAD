@@ -32,10 +32,13 @@
 
 #pragma once
 
+#include <string>
+#include <variant>
+
 #include "dbCore.h"
-#include "dbId.h"
-#include "dbTypes.h"
-#include "odb.h"
+#include "odb/dbId.h"
+#include "odb/dbTypes.h"
+#include "odb/odb.h"
 
 namespace odb {
 
@@ -73,13 +76,7 @@ class _dbProperty : public _dbObject
   dbId<_dbProperty> _next;
   uint _owner;
 
-  union
-  {
-    char* _str_val;
-    uint _bool_val;
-    int _int_val;
-    double _double_val;
-  } _value;
+  std::variant<std::string, bool, int, double> _value;
 
   _dbProperty(_dbDatabase*);
   _dbProperty(_dbDatabase*, const _dbProperty& n);

@@ -38,9 +38,11 @@
 #include <cstdint>
 
 #include "sta/Liberty.hh"
+#include "sta/Network.hh"
 #include "rsz/Resizer.hh"
 #include "sta/Delay.hh"
 #include "sta/Liberty.hh"
+#include "db_sta/dbNetwork.hh"
 
 namespace ord {
 // Defined in OpenRoad.i
@@ -60,8 +62,8 @@ PinSet *
 tclListSetPin(Tcl_Obj *source,
               Tcl_Interp *interp);
 
-typedef NetSeq TmpNetSeq;
-typedef PinSet TmpPinSet;
+using TmpNetSeq = NetSeq ;
+using TmpPinSet = PinSet;
 
 } // namespace
 
@@ -85,11 +87,35 @@ using sta::LibertyPort;
 using sta::Delay;
 using sta::Slew;
 using sta::dbNetwork;
+using sta::Network;
 using sta::stringEq;
 
 using rsz::Resizer;
 using rsz::ParasiticsSrc;
 
+template <class SET_TYPE, class OBJECT_TYPE>
+SET_TYPE *
+tclListNetworkSet(Tcl_Obj *const source,
+                  swig_type_info *swig_type,
+                  Tcl_Interp *interp,
+                  const Network *network)
+{
+  int argc;
+  Tcl_Obj **argv;
+  if (Tcl_ListObjGetElements(interp, source, &argc, &argv) == TCL_OK
+      && argc > 0) {
+    SET_TYPE *set = new SET_TYPE(network);
+    for (int i = 0; i < argc; i++) {
+      void *obj;
+      // Ignore returned TCL_ERROR because can't get swig_type_info.
+      SWIG_ConvertPtr(argv[i], &obj, swig_type, false);
+      set->insert(reinterpret_cast<OBJECT_TYPE*>(obj));
+    }
+    return set;
+  }
+  else
+    return nullptr;
+}
 %}
 
 ////////////////////////////////////////////////////////////////
@@ -120,11 +146,24 @@ using rsz::ParasiticsSrc;
   NetSeq *nets = $1;
   NetSeq::Iterator net_iter(nets);
   while (net_iter.hasNext()) {
-    Net *net = net_iter.next();
-    Tcl_Obj *obj = SWIG_NewInstanceObj(net, SWIGTYPE_p_Net, false);
+    const Net *net = net_iter.next();
+    Tcl_Obj *obj = SWIG_NewInstanceObj(const_cast<Net*>(net), SWIGTYPE_p_Net, false);
     Tcl_ListObjAppendElement(interp, list, obj);
   }
   delete nets;
+  Tcl_SetObjResult(interp, list);
+}
+
+%typemap(out) TmpPinSet* {
+  Tcl_Obj *list = Tcl_NewListObj(0, nullptr);
+  PinSet *pins = $1;
+  PinSet::Iterator pin_iter(pins);
+  while (pin_iter.hasNext()) {
+    const Pin *pin = pin_iter.next();
+    Tcl_Obj *obj = SWIG_NewInstanceObj(const_cast<Pin*>(pin), SWIGTYPE_p_Pin, false);
+    Tcl_ListObjAppendElement(interp, list, obj);
+  }
+  delete pins;
   Tcl_SetObjResult(interp, list);
 }
 
@@ -133,8 +172,8 @@ using rsz::ParasiticsSrc;
   NetSeq *nets = $1;
   NetSeq::Iterator net_iter(nets);
   while (net_iter.hasNext()) {
-    Net *net = net_iter.next();
-    Tcl_Obj *obj = SWIG_NewInstanceObj(net, SWIGTYPE_p_Net, false);
+    const Net *net = net_iter.next();
+    Tcl_Obj *obj = SWIG_NewInstanceObj(const_cast<Net*>(net), SWIGTYPE_p_Net, false);
     Tcl_ListObjAppendElement(interp, list, obj);
   }
   Tcl_SetObjResult(interp, list);
@@ -146,15 +185,17 @@ using rsz::ParasiticsSrc;
 }
 
 %typemap(in) PinSet* {
-  $1 = tclListSetPin($input, interp);
+  Resizer *resizer = getResizer();
+  dbNetwork *network = resizer->getDbNetwork();
+  $1 = tclListNetworkSet<PinSet, Pin>($input, SWIGTYPE_p_Pin, interp, network);
 }
 
 %typemap(out) PinSet {
   Tcl_Obj *list = Tcl_NewListObj(0, nullptr);
   PinSet::Iterator pin_iter($1);
   while (pin_iter.hasNext()) {
-    Pin *pin = pin_iter.next();
-    Tcl_Obj *obj = SWIG_NewInstanceObj(pin, SWIGTYPE_p_Pin, false);
+    const Pin *pin = pin_iter.next();
+    Tcl_Obj *obj = SWIG_NewInstanceObj(const_cast<Pin*>(pin), SWIGTYPE_p_Pin, false);
     Tcl_ListObjAppendElement(interp, list, obj);
   }
   Tcl_SetObjResult(interp, list);
@@ -216,23 +257,43 @@ layer_capacitance(odb::dbTechLayer *layer,
 }
 
 void
-set_wire_signal_rc_cmd(const Corner *corner,
-                       float res,
-                       float cap)
+set_h_wire_signal_rc_cmd(const Corner *corner,
+                         float res,
+                         float cap)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->setWireSignalRC(corner, res, cap);
+  resizer->setHWireSignalRC(corner, res, cap);
 }
 
 void
-set_wire_clk_rc_cmd(const Corner *corner,
-                    float res,
-                    float cap)
+set_v_wire_signal_rc_cmd(const Corner *corner,
+                         float res,
+                         float cap)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->setWireClkRC(corner, res, cap);
+  resizer->setVWireSignalRC(corner, res, cap);
+}
+
+void
+set_h_wire_clk_rc_cmd(const Corner *corner,
+                      float res,
+                      float cap)
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->setHWireClkRC(corner, res, cap);
+}
+
+void
+set_v_wire_clk_rc_cmd(const Corner *corner,
+                      float res,
+                      float cap)
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->setVWireClkRC(corner, res, cap);
 }
 
 // ohms/meter
@@ -302,6 +363,14 @@ remove_buffers_cmd()
 }
 
 void
+balance_row_usage_cmd()
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->balanceRowUsage();
+}
+
+void
 set_max_utilization(double max_utilization)
 {
   ensureLinked();
@@ -310,20 +379,30 @@ set_max_utilization(double max_utilization)
 }
 
 void
-set_dont_use_cmd(LibertyCellSeq *dont_use)
+set_dont_use(LibertyCell *lib_cell,
+             bool dont_use)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->setDontUse(dont_use);
-  delete dont_use;
+  resizer->setDontUse(lib_cell, dont_use);
 }
 
 void
-resizer_preamble()
+set_dont_touch_instance(Instance *inst,
+                        bool dont_touch)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->resizePreamble();
+  resizer->setDontTouch(inst, dont_touch);
+}
+
+void
+set_dont_touch_net(Net *net,
+                   bool dont_touch)
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->setDontTouch(net, dont_touch);
 }
 
 void
@@ -343,19 +422,11 @@ buffer_outputs()
 }
 
 void
-resize_to_target_slew()
+resize_to_target_slew(const Pin *drvr_pin)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->resizeToTargetSlew();
-}
-
-void
-resize_driver_to_target_slew(const Pin *drvr_pin)
-{
-  ensureLinked();
-  Resizer *resizer = getResizer();
-  resizer->resizeToTargetSlew(drvr_pin, false);
+  resizer->resizeDrvrToTargetSlew(drvr_pin);
 }
 
 double
@@ -390,6 +461,14 @@ find_floating_nets()
   return resizer->findFloatingNets();
 }
 
+TmpPinSet *
+find_floating_pins()
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  return resizer->findFloatingPins();
+}
+
 void
 repair_tie_fanout_cmd(LibertyPort *tie_port,
                       double separation, // meters
@@ -403,11 +482,19 @@ repair_tie_fanout_cmd(LibertyPort *tie_port,
 void
 repair_design_cmd(double max_length,
                   double slew_margin,
-                  double cap_margin)
+                  double cap_margin,
+                  bool verbose)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->repairDesign(max_length, slew_margin, cap_margin);
+  resizer->repairDesign(max_length, slew_margin, cap_margin, verbose);
+}
+
+int
+repair_design_buffer_count()
+{
+  Resizer *resizer = getResizer();
+  return resizer->repairDesignBufferCount();
 }
 
 void
@@ -438,15 +525,21 @@ repair_net_cmd(Net *net,
 }
 
 void
-repair_setup(float slack_margin)
+repair_setup(double setup_margin,
+             double repair_tns_end_percent,
+             int max_passes,
+             bool verbose,
+             bool skip_pin_swap, bool skip_gate_cloning)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->repairSetup(slack_margin);
+  resizer->repairSetup(setup_margin, repair_tns_end_percent,
+                       max_passes, verbose,
+                       skip_pin_swap, skip_gate_cloning);
 }
 
 void
-repair_setup_pin(Pin *end_pin)
+repair_setup_pin_cmd(Pin *end_pin)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
@@ -454,23 +547,58 @@ repair_setup_pin(Pin *end_pin)
 }
 
 void
-repair_hold_pin(Pin *end_pin,
-                LibertyCell *buffer_cell,
-                bool allow_setup_violations)
+report_swappable_pins_cmd()
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->repairHold(end_pin, buffer_cell, 0.0, allow_setup_violations, 0.2);
+  resizer->reportSwappablePins();
 }
 
 void
-repair_hold(float slack_margin,
+repair_hold(double setup_margin,
+            double hold_margin,
             bool allow_setup_violations,
-            float max_buffer_percent)
+            float max_buffer_percent,
+            int max_passes,
+            bool verbose)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->repairHold(slack_margin, allow_setup_violations, max_buffer_percent);
+  resizer->repairHold(setup_margin, hold_margin,
+                      allow_setup_violations,
+                      max_buffer_percent, max_passes,
+                      verbose);
+}
+
+void
+repair_hold_pin(Pin *end_pin,
+                double setup_margin,
+                double hold_margin,
+                bool allow_setup_violations,
+                float max_buffer_percent,
+                int max_passes)
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->repairHold(end_pin, setup_margin, hold_margin,
+                      allow_setup_violations,
+                      max_buffer_percent, max_passes);
+}
+
+int
+hold_buffer_count()
+{
+  Resizer *resizer = getResizer();
+  return resizer->holdBufferCount();
+}
+
+////////////////////////////////////////////////////////////////
+void
+recover_power(float recover_power_percent)
+{
+  ensureLinked();
+  Resizer *resizer = getResizer();
+  resizer->recoverPower(recover_power_percent);
 }
 
 ////////////////////////////////////////////////////////////////
@@ -482,7 +610,7 @@ rebuffer_net(const Pin *drvr_pin)
 {
   ensureLinked();
   Resizer *resizer = getResizer();
-  resizer->rebuffer1(drvr_pin);
+  resizer->rebufferNet(drvr_pin);
 }
 
 void
@@ -522,19 +650,10 @@ float
 resize_net_slack(Net *net)
 {
   Resizer *resizer = getResizer();
-  return resizer->resizeNetSlack(net);
+  return resizer->resizeNetSlack(net).value();
 }
 
 ////////////////////////////////////////////////////////////////
-
-float
-buffer_self_delay(LibertyCell *buffer_cell,
-                  const RiseFall *rf)
-{
-  ensureLinked();
-  Resizer *resizer = getResizer();
-  return resizer->bufferSelfDelay(buffer_cell, rf);
-}
 
 float
 buffer_wire_delay(LibertyCell *buffer_cell,
@@ -564,17 +683,6 @@ find_buffer_max_wire_length(LibertyCell *buffer_cell,
   ensureLinked();
   Resizer *resizer = getResizer();
   return resizer->findMaxWireLength(buffer_cell, corner);
-}
-
-double
-find_max_slew_wire_length(LibertyPort *drvr_port,
-                          LibertyPort *load_port,
-                          float max_slew,
-                          const Corner *corner)
-{
-  ensureLinked();
-  Resizer *resizer = getResizer();
-  return resizer->findMaxSlewWireLength(drvr_port, load_port, max_slew, corner);
 }
 
 double
@@ -617,10 +725,24 @@ highlight_steiner_tree(const Pin *drvr_pin)
 }
 
 PinSet
-find_fanin_fanouts(PinSet *pins)
+find_fanin_fanouts(PinSet* pins)
 {
   Resizer *resizer = getResizer();
-  return resizer->findFaninFanouts(pins);
+  return resizer->findFaninFanouts(*pins);
+}
+
+void
+set_debug_pin(const Pin *pin)
+{
+  Resizer *resizer = getResizer();
+  resizer->setDebugPin(pin);
+}
+
+void
+set_worst_slack_nets_percent(float percent)
+{
+  Resizer *resizer = getResizer();
+  resizer->setWorstSlackNetsPercent(percent);
 }
 
 } // namespace

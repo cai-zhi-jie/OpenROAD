@@ -26,32 +26,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GR_ACCESS_PATTERN_H_
-#define _GR_ACCESS_PATTERN_H_
+#pragma once
 
 #include "db/grObj/grBlockObject.h"
 #include "db/infra/frPoint.h"
 
-namespace fr {
+namespace drt {
 class grPin;
 class frViaDef;
 class grAccessPattern : public grBlockObject
 {
  public:
-  // constructors
-  grAccessPattern()
-      : beginPoint(),
-        beginLayerNum(0),
-        pin(nullptr),
-        validAccess(std::vector<bool>(6, true)),
-        vU(nullptr),
-        vD(nullptr),
-        vUIdx(0),
-        vDIdx(0)
-  {
-  }
   // getters
-  void getPoint(Point& bpIn) const { bpIn = beginPoint; }
   Point getPoint() const { return beginPoint; }
   frLayerNum getBeginLayerNum() const { return beginLayerNum; }
   grPin* getPin() const { return pin; }
@@ -84,17 +70,15 @@ class grAccessPattern : public grBlockObject
   {
     if (dir == frDirEnum::U) {
       return !(vU == nullptr);
-    } else {
-      return !(vD == nullptr);
     }
+    return !(vD == nullptr);
   }
   frViaDef* getAccessViaDef(const frDirEnum& dir = frDirEnum::U)
   {
     if (dir == frDirEnum::U) {
       return (*vU)[vUIdx];
-    } else {
-      return (*vD)[vDIdx];
     }
+    return (*vD)[vDIdx];
   }
 
   // setters
@@ -116,14 +100,12 @@ class grAccessPattern : public grBlockObject
 
  protected:
   Point beginPoint;
-  frLayerNum beginLayerNum;
-  grPin* pin;
-  std::vector<bool> validAccess;
-  std::vector<frViaDef*>* vU;
-  std::vector<frViaDef*>* vD;
-  int vUIdx;
-  int vDIdx;
+  frLayerNum beginLayerNum{0};
+  grPin* pin{nullptr};
+  std::vector<bool> validAccess = std::vector<bool>(6, true);
+  std::vector<frViaDef*>* vU{nullptr};
+  std::vector<frViaDef*>* vD{nullptr};
+  int vUIdx{0};
+  int vDIdx{0};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

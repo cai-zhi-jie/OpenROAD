@@ -26,25 +26,17 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_TRACKPATTERN_H_
-#define _FR_TRACKPATTERN_H_
+#pragma once
 
 #include "db/obj/frBlockObject.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class frTrackPattern : public frBlockObject
 {
  public:
   // constructors
-  frTrackPattern()
-      : horizontal_(false),
-        startCoord_(0),
-        numTracks_(0),
-        trackSpacing_(0),
-        layerNum_(0)
-  {
-  }
+  frTrackPattern() = default;
   frTrackPattern(bool tmpIsH,
                  frCoord tmpSC,
                  frUInt4 tmpNT,
@@ -77,26 +69,11 @@ class frTrackPattern : public frBlockObject
   frBlockObjectEnum typeId() const override { return frcTrackPattern; }
 
  private:
-  bool horizontal_;
-  frCoord startCoord_;
-  frUInt4 numTracks_;
-  frUInt4 trackSpacing_;
-  frLayerNum layerNum_;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & horizontal_;
-    (ar) & startCoord_;
-    (ar) & numTracks_;
-    (ar) & trackSpacing_;
-    (ar) & layerNum_;
-  }
-
-  friend class boost::serialization::access;
+  bool horizontal_{false};
+  frCoord startCoord_{0};
+  frUInt4 numTracks_{0};
+  frUInt4 trackSpacing_{0};
+  frLayerNum layerNum_{0};
 };
 
-}  // namespace fr
-
-#endif
+}  // namespace drt

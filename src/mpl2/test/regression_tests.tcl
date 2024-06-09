@@ -1,4 +1,6 @@
 record_tests {
-    #aes_macro_place,
-    mp_test1
+    macro_only
+    no_unfixed_macros
+    #mpl2_man_tcl_check
+    #mpl2_readme_msgs_check
 }

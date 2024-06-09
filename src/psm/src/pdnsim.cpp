@@ -31,209 +31,220 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #include "psm/pdnsim.h"
-#include <tcl.h>
-#include <fstream>
-#include <iostream>
-#include <iomanip>
-#include <sstream>
-#include "odb/db.h"
-#include "ir_solver.h"
+
 #include <string>
 #include <vector>
-#include "gmat.h"
-#include "node.h"
+
+#include "db_sta/dbNetwork.hh"
+#include "db_sta/dbSta.hh"
+#include "heatMap.h"
+#include "ir_network.h"
+#include "ir_solver.h"
+#include "odb/db.h"
+#include "shape.h"
+#include "sta/Corner.hh"
+#include "sta/DcalcAnalysisPt.hh"
+#include "sta/Liberty.hh"
 #include "utl/Logger.h"
 
 namespace psm {
 
-PDNSim::PDNSim()
-    : _db(nullptr),
-      _sta(nullptr),
-      _logger(nullptr),
-      _vsrc_loc(""),
-      _out_file(""),
-      _em_out_file(""),
-      _enable_em(0),
-      _bump_pitch_x(0),
-      _bump_pitch_y(0),
-      _spice_out_file(""),
-      _power_net("")
-      {};
+PDNSim::PDNSim() = default;
 
-PDNSim::~PDNSim()
+PDNSim::~PDNSim() = default;
+
+void PDNSim::init(utl::Logger* logger,
+                  odb::dbDatabase* db,
+                  sta::dbSta* sta,
+                  rsz::Resizer* resizer)
 {
-  _db             = nullptr;
-  _sta            = nullptr;
-  _vsrc_loc       = "";
-  _power_net      = "";
-  _out_file       = "";
-  _em_out_file    = "";
-  _enable_em      = 0;
-  _spice_out_file = "";
-  _bump_pitch_x   = 0;
-  _bump_pitch_y   = 0;
-  //_net_voltage_map = nullptr;
+  db_ = db;
+  sta_ = sta;
+  resizer_ = resizer;
+  logger_ = logger;
+  heatmap_ = std::make_unique<IRDropDataSource>(this, sta, logger_);
+  heatmap_->registerHeatMap();
 }
 
-void PDNSim::init(utl::Logger* logger, odb::dbDatabase* db, sta::dbSta* sta)
+void PDNSim::setDebugGui(bool enable)
 {
-  _db     = db;
-  _sta    = sta;
-  _logger = logger;
-}
+  debug_gui_enabled_ = enable;
 
-void PDNSim::set_power_net(std::string net)
-{
-  _power_net = net;
-}
-
-void PDNSim::set_bump_pitch_x(float bump_pitch)
-{
-  _bump_pitch_x = bump_pitch;
-}
-
-void PDNSim::set_bump_pitch_y(float bump_pitch)
-{
-  _bump_pitch_y = bump_pitch;
-}
-
-void PDNSim::set_pdnsim_net_voltage(std::string net, float voltage)
-{
-  _net_voltage_map.insert(std::pair<std::string, float>(net, voltage));
-}
-
-void PDNSim::import_vsrc_cfg(std::string vsrc)
-{
-  _vsrc_loc = vsrc;
-  _logger->info(utl::PSM, 1, "Reading voltage source file: {}.", _vsrc_loc);
-}
-
-void PDNSim::import_out_file(std::string out_file)
-{
-  _out_file = out_file;
-  _logger->info(
-      utl::PSM, 2, "Output voltage file is specified as: {}.", _out_file);
-}
-
-void PDNSim::import_em_out_file(std::string em_out_file)
-{
-  _em_out_file = em_out_file;
-  _logger->info(utl::PSM, 3, "Output current file specified {}.", _em_out_file);
-}
-void PDNSim::import_enable_em(int enable_em)
-{
-  _enable_em = enable_em;
-  if (_enable_em == 1) {
-    _logger->info(utl::PSM, 4, "EM calculation is enabled.");
+  for (const auto& [net, solver] : solvers_) {
+    solver->enableGui(debug_gui_enabled_);
   }
+
+  gui::Gui::get()->registerDescriptor<Node*>(new NodeDescriptor(solvers_));
+  gui::Gui::get()->registerDescriptor<ITermNode*>(
+      new ITermNodeDescriptor(solvers_));
+  gui::Gui::get()->registerDescriptor<BPinNode*>(
+      new BPinNodeDescriptor(solvers_));
+  gui::Gui::get()->registerDescriptor<Connection*>(
+      new ConnectionDescriptor(solvers_));
 }
 
-void PDNSim::import_spice_out_file(std::string out_file)
+void PDNSim::setNetVoltage(odb::dbNet* net, sta::Corner* corner, double voltage)
 {
-  _spice_out_file = out_file;
-  _logger->info(
-      utl::PSM, 5, "Output spice file is specified as: {}.", _spice_out_file);
+  auto& voltages = user_voltages_[net];
+  voltages[corner] = voltage;
 }
 
-void PDNSim::write_pg_spice()
+void PDNSim::analyzePowerGrid(odb::dbNet* net,
+                              sta::Corner* corner,
+                              GeneratedSourceType source_type,
+                              const std::string& voltage_file,
+                              bool enable_em,
+                              const std::string& em_file,
+                              const std::string& error_file,
+                              const std::string& voltage_source_file)
 {
-  IRSolver* irsolve_h = new IRSolver(_db,
-                                     _sta,
-                                     _logger,
-                                     _vsrc_loc,
-                                     _power_net,
-                                     _out_file,
-                                     _em_out_file,
-                                     _spice_out_file,
-                                     _enable_em,
-                                     _bump_pitch_x,
-                                     _bump_pitch_y,
-                                     _net_voltage_map);
+  if (!checkConnectivity(net, false, error_file)) {
+    return;
+  }
 
-  if (!irsolve_h->Build()) {
-    delete irsolve_h;
+  auto* solver = getIRSolver(net, false);
+  solver->solve(corner, source_type, voltage_source_file);
+  solver->report(corner);
+
+  heatmap_->setNet(net);
+  heatmap_->setCorner(corner);
+  heatmap_->update();
+
+  if (enable_em) {
+    solver->reportEM(corner);
+    solver->writeEMFile(em_file, corner);
+  }
+
+  solver->writeInstanceVoltageFile(voltage_file, corner);
+}
+
+bool PDNSim::checkConnectivity(odb::dbNet* net,
+                               bool floorplanning,
+                               const std::string& error_file)
+{
+  auto* solver = getIRSolver(net, floorplanning);
+  const bool check = solver->check();
+  solver->writeErrorFile(error_file);
+
+  if (debug_gui_enabled_) {
+    solver->enableGui(true);
+  }
+
+  if (logger_->debugCheck(utl::PSM, "stats", 1)) {
+    solver->getNetwork()->reportStats();
+  }
+
+  if (check) {
+    logger_->info(
+        utl::PSM, 40, "All shapes on net {} are connected.", net->getName());
   } else {
-    int check_spice = irsolve_h->PrintSpice();
-    if (check_spice) {
-      _logger->info(
-          utl::PSM, 6, "SPICE file is written at: {}.", _spice_out_file);
-    } else {
-      _logger->error(
-          utl::PSM, 7, "Failed to write out spice file: {}.", _spice_out_file);
-    }
+    logger_->error(
+        utl::PSM, 69, "Check connectivity failed on {}.", net->getName());
+  }
+  return check;
+}
+
+void PDNSim::writeSpiceNetwork(odb::dbNet* net,
+                               sta::Corner* corner,
+                               GeneratedSourceType source_type,
+                               const std::string& spice_file,
+                               const std::string& voltage_source_file)
+{
+  auto* solver = getIRSolver(net, false);
+  solver->writeSpiceFile(source_type, spice_file, corner, voltage_source_file);
+}
+
+psm::IRSolver* PDNSim::getIRSolver(odb::dbNet* net, bool floorplanning)
+{
+  auto& solver = solvers_[net];
+  if (solver == nullptr) {
+    solver = std::make_unique<IRSolver>(net,
+                                        floorplanning,
+                                        sta_,
+                                        resizer_,
+                                        logger_,
+                                        user_voltages_,
+                                        generated_source_settings_);
+    addOwner(net->getBlock());
+  }
+
+  return solver.get();
+}
+
+void PDNSim::getIRDropForLayer(odb::dbNet* net,
+                               sta::Corner* corner,
+                               odb::dbTechLayer* layer,
+                               IRDropByPoint& ir_drop) const
+{
+  auto find_solver = solvers_.find(net);
+  if (find_solver == solvers_.end()) {
+    return;
+  }
+  ir_drop = find_solver->second->getIRDrop(layer, corner);
+}
+
+void PDNSim::setGeneratedSourceSettings(const GeneratedSourceSettings& settings)
+{
+  if (settings.bump_dx > 0) {
+    generated_source_settings_.bump_dx = settings.bump_dx;
+  }
+  if (settings.bump_dy > 0) {
+    generated_source_settings_.bump_dy = settings.bump_dy;
+  }
+  if (settings.bump_interval > 0) {
+    generated_source_settings_.bump_interval = settings.bump_interval;
+  }
+  if (settings.bump_size > 0) {
+    generated_source_settings_.bump_size = settings.bump_size;
+  }
+  if (settings.strap_track_pitch > 0) {
+    generated_source_settings_.strap_track_pitch = settings.strap_track_pitch;
   }
 }
 
-int PDNSim::analyze_power_grid()
+void PDNSim::clearSolvers()
 {
-  GMat*     gmat_obj;
-  IRSolver* irsolve_h = new IRSolver(_db,
-                                     _sta,
-                                     _logger,
-                                     _vsrc_loc,
-                                     _power_net,
-                                     _out_file,
-                                     _em_out_file,
-                                     _spice_out_file,
-                                     _enable_em,
-                                     _bump_pitch_x,
-                                     _bump_pitch_y,
-                                     _net_voltage_map);
-
-  if (!irsolve_h->Build()) {
-    delete irsolve_h;
-    return 0;
-  }
-  gmat_obj = irsolve_h->GetGMat();
-  irsolve_h->SolveIR();
-  std::vector<Node*> nodes       = gmat_obj->GetAllNodes();
-  int                vsize;
-  vsize = nodes.size();
-  for (int n = 0; n < vsize; n++) {
-    Node* node = nodes[n];
-    if (node->GetLayerNum() != 1)
-      continue;
-  }
-  _logger->report("########## IR report #################");
-  _logger->report("Worstcase voltage: {:3.2e} V", irsolve_h->wc_voltage);
-  _logger->report("Average IR drop  : {:3.2e} V",
-                  abs(irsolve_h->supply_voltage_src - irsolve_h->avg_voltage));
-  _logger->report("Worstcase IR drop: {:3.2e} V",
-                  abs(irsolve_h->supply_voltage_src - irsolve_h->wc_voltage));
-  _logger->report("######################################");
-  if (_enable_em == 1) {
-    _logger->report("########## EM analysis ###############");
-    _logger->report("Maximum current: {:3.2e} A", irsolve_h->max_cur);
-    _logger->report("Average current: {:3.2e} A", irsolve_h->avg_cur);
-    _logger->report("Number of resistors: {}", irsolve_h->num_res);
-    _logger->report("######################################");
-  }
-
-  delete irsolve_h;
-  return 1;
+  solvers_.clear();
 }
 
-int PDNSim::check_connectivity()
+void PDNSim::inDbPostMoveInst(odb::dbInst*)
 {
-  IRSolver* irsolve_h = new IRSolver(_db,
-                                     _sta,
-                                     _logger,
-                                     _vsrc_loc,
-                                     _power_net,
-                                     _out_file,
-                                     _em_out_file,
-                                     _spice_out_file,
-                                     _enable_em,
-                                     _bump_pitch_x,
-                                     _bump_pitch_y,
-                                     _net_voltage_map);
-  if (!irsolve_h->BuildConnection()) {
-    delete irsolve_h;
-    return 0;
-  }
-  int val = irsolve_h->GetConnectionTest();
-  delete irsolve_h;
-  return val;
+  clearSolvers();
+}
+
+void PDNSim::inDbNetDestroy(odb::dbNet*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbBTermPostConnect(odb::dbBTerm*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbBTermPostDisConnect(odb::dbBTerm*, odb::dbNet*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbBPinDestroy(odb::dbBPin*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbSWireAddSBox(odb::dbSBox*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbSWireRemoveSBox(odb::dbSBox*)
+{
+  clearSolvers();
+}
+
+void PDNSim::inDbSWirePostDestroySBoxes(odb::dbSWire*)
+{
+  clearSolvers();
 }
 
 }  // namespace psm

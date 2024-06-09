@@ -37,15 +37,7 @@
 // Includes.
 ////////////////////////////////////////////////////////////////////////////////
 #include "detailed_hpwl.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <algorithm>
-#include <boost/tokenizer.hpp>
-#include <cmath>
-#include <iostream>
-#include <stack>
-#include <utility>
-#include "detailed_manager.h"
+
 #include "detailed_orient.h"
 
 namespace dpo {
@@ -60,199 +52,171 @@ namespace dpo {
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-DetailedHPWL::DetailedHPWL(Architecture* arch, Network* network,
-                           RoutingParams* rt)
+DetailedHPWL::DetailedHPWL(Network* network)
     : DetailedObjective("hpwl"),
-      m_arch(arch),
-      m_network(network),
-      m_rt(rt),
-      m_mgrPtr(nullptr),
-      m_orientPtr(nullptr),
-      m_skipNetsLargerThanThis(100),
-      m_traversal(0),
-      m_edgeMask(m_network->getNumEdges(), m_traversal)
+      network_(network),
+      edgeMask_(network_->getNumEdges(), traversal_)
 {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-DetailedHPWL::~DetailedHPWL() {}
-
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-void DetailedHPWL::init() {
-  m_traversal = 0;
-  m_edgeMask.resize(m_network->getNumEdges());
-  std::fill(m_edgeMask.begin(), m_edgeMask.end(), m_traversal);
+void DetailedHPWL::init()
+{
+  traversal_ = 0;
+  edgeMask_.resize(network_->getNumEdges());
+  std::fill(edgeMask_.begin(), edgeMask_.end(), traversal_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-void DetailedHPWL::init(DetailedMgr* mgrPtr, DetailedOrient* orientPtr) {
-  m_orientPtr = orientPtr;
-  m_mgrPtr = mgrPtr;
+void DetailedHPWL::init(DetailedMgr* mgrPtr, DetailedOrient* orientPtr)
+{
+  orientPtr_ = orientPtr;
+  mgrPtr_ = mgrPtr;
   init();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedHPWL::curr() {
-  double xmin, xmax, ymin, ymax;
-  double x, y;
+double DetailedHPWL::curr()
+{
   double hpwl = 0.;
-  for (int i = 0; i < m_network->getNumEdges(); i++) {
-    Edge* edi = m_network->getEdge(i);
+  Rectangle box;
+  for (int i = 0; i < network_->getNumEdges(); i++) {
+    const Edge* edi = network_->getEdge(i);
 
-    int npins = edi->getPins().size();
-    if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+    const int npins = edi->getNumPins();
+    if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
       continue;
     }
 
-    xmin = std::numeric_limits<double>::max();
-    xmax = -std::numeric_limits<double>::max();
-    ymin = std::numeric_limits<double>::max();
-    ymax = -std::numeric_limits<double>::max();
+    box.reset();
+    for (const Pin* pinj : edi->getPins()) {
+      const Node* ndj = pinj->getNode();
 
-    for (int pj = 0; pj < edi->getPins().size(); pj++) {
-      Pin* pinj = edi->getPins()[pj];
+      const double x
+          = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+      const double y
+          = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-      Node* ndj = pinj->getNode();
-
-      x = ndj->getX() + pinj->getOffsetX();
-      y = ndj->getY() + pinj->getOffsetY();
-
-      xmin = std::min(xmin, x);
-      xmax = std::max(xmax, x);
-      ymin = std::min(ymin, y);
-      ymax = std::max(ymax, y);
+      box.addPt(x, y);
     }
 
-    hpwl += ((xmax - xmin) + (ymax - ymin));
+    hpwl += (box.getWidth() + box.getHeight());
   }
   return hpwl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedHPWL::delta(int n, std::vector<Node*>& nodes,
-                           std::vector<double>& curX, std::vector<double>& curY,
-                           std::vector<unsigned>& curOri,
-                           std::vector<double>& newX, std::vector<double>& newY,
-                           std::vector<unsigned>& newOri) {
+double DetailedHPWL::delta(const int n,
+                           const std::vector<Node*>& nodes,
+                           const std::vector<int>& curLeft,
+                           const std::vector<int>& curBottom,
+                           const std::vector<unsigned>& curOri,
+                           const std::vector<int>& newLeft,
+                           const std::vector<int>& newBottom,
+                           const std::vector<unsigned>& newOri)
+{
   // Given a list of nodes with their old positions and new positions, compute
   // the change in WL. Note that we need to know the orientation information and
   // might need to adjust pin information...
 
   double x, y;
   double old_wl = 0.;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
   double new_wl = 0.;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
+  Rectangle old_box, new_box;
 
   // Put cells into their "old positions and orientations".
   for (int i = 0; i < n; i++) {
-    nodes[i]->setX(curX[i]);
-    nodes[i]->setY(curY[i]);
-    if (m_orientPtr != 0) {
-      m_orientPtr->orientAdjust(nodes[i], curOri[i]);
+    nodes[i]->setLeft(curLeft[i]);
+    nodes[i]->setBottom(curBottom[i]);
+    if (orientPtr_ != nullptr) {
+      orientPtr_->orientAdjust(nodes[i], curOri[i]);
     }
   }
 
-  ++m_traversal;
+  ++traversal_;
   for (int i = 0; i < n; i++) {
     Node* ndi = nodes[i];
-    for (int pi = 0; pi < ndi->getPins().size(); pi++) {
-      Pin* pini = ndi->getPins()[pi];
-
+    for (Pin* pini : ndi->getPins()) {
       Edge* edi = pini->getEdge();
 
-      int npins = edi->getPins().size();
-      if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+      int npins = edi->getNumPins();
+      if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
         continue;
       }
-      if (m_edgeMask[edi->getId()] == m_traversal) {
+      if (edgeMask_[edi->getId()] == traversal_) {
         continue;
       }
-      m_edgeMask[edi->getId()] = m_traversal;
+      edgeMask_[edi->getId()] = traversal_;
 
-      old_xmin = std::numeric_limits<double>::max();
-      old_xmax = -std::numeric_limits<double>::max();
-      old_ymin = std::numeric_limits<double>::max();
-      old_ymax = -std::numeric_limits<double>::max();
-      for (int pj = 0; pj < edi->getPins().size(); pj++) {
+      old_box.reset();
+      for (int pj = 0; pj < edi->getNumPins(); pj++) {
         Pin* pinj = edi->getPins()[pj];
 
         Node* curr = pinj->getNode();
 
-        x = curr->getX() + pinj->getOffsetX();
-        y = curr->getY() + pinj->getOffsetY();
+        x = curr->getLeft() + 0.5 * curr->getWidth() + pinj->getOffsetX();
+        y = curr->getBottom() + 0.5 * curr->getHeight() + pinj->getOffsetY();
 
-        old_xmin = std::min(old_xmin, x);
-        old_xmax = std::max(old_xmax, x);
-        old_ymin = std::min(old_ymin, y);
-        old_ymax = std::max(old_ymax, y);
+        old_box.addPt(x, y);
       }
 
-      old_wl += ((old_xmax - old_xmin) + (old_ymax - old_ymin));
+      old_wl += (old_box.getWidth() + old_box.getHeight());
     }
   }
 
   // Put cells into their "new positions and orientations".
   for (int i = 0; i < n; i++) {
-    nodes[i]->setX(newX[i]);
-    nodes[i]->setY(newY[i]);
-    if (m_orientPtr != 0) {
-      m_orientPtr->orientAdjust(nodes[i], newOri[i]);
+    nodes[i]->setLeft(newLeft[i]);
+    nodes[i]->setBottom(newBottom[i]);
+    if (orientPtr_ != nullptr) {
+      orientPtr_->orientAdjust(nodes[i], newOri[i]);
     }
   }
 
-  ++m_traversal;
+  ++traversal_;
   for (int i = 0; i < n; i++) {
     Node* ndi = nodes[i];
-    for (int pi = 0; pi < ndi->getPins().size(); pi++) {
+    for (int pi = 0; pi < ndi->getNumPins(); pi++) {
       Pin* pini = ndi->getPins()[pi];
 
       Edge* edi = pini->getEdge();
 
-      int npins = edi->getPins().size();
-      if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+      int npins = edi->getNumPins();
+      if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
         continue;
       }
-      if (m_edgeMask[edi->getId()] == m_traversal) {
+      if (edgeMask_[edi->getId()] == traversal_) {
         continue;
       }
-      m_edgeMask[edi->getId()] = m_traversal;
+      edgeMask_[edi->getId()] = traversal_;
 
-      new_xmin = std::numeric_limits<double>::max();
-      new_xmax = -std::numeric_limits<double>::max();
-      new_ymin = std::numeric_limits<double>::max();
-      new_ymax = -std::numeric_limits<double>::max();
-
-      for (int pj = 0; pj < edi->getPins().size(); pj++) {
+      new_box.reset();
+      for (int pj = 0; pj < edi->getNumPins(); pj++) {
         Pin* pinj = edi->getPins()[pj];
 
         Node* curr = pinj->getNode();
 
-        x = curr->getX() + pinj->getOffsetX();
-        y = curr->getY() + pinj->getOffsetY();
+        x = curr->getLeft() + 0.5 * curr->getWidth() + pinj->getOffsetX();
+        y = curr->getBottom() + 0.5 * curr->getHeight() + pinj->getOffsetY();
 
-        new_xmin = std::min(new_xmin, x);
-        new_xmax = std::max(new_xmax, x);
-        new_ymin = std::min(new_ymin, y);
-        new_ymax = std::max(new_ymax, y);
+        new_box.addPt(x, y);
       }
 
-      new_wl += ((new_xmax - new_xmin) + (new_ymax - new_ymin));
+      new_wl += (new_box.getWidth() + new_box.getHeight());
     }
   }
 
   // Put cells into their "old positions and orientations" before returning
   // (leave things as they were provided to us...).
   for (int i = 0; i < n; i++) {
-    nodes[i]->setX(curX[i]);
-    nodes[i]->setY(curY[i]);
-    if (m_orientPtr != 0) {
-      m_orientPtr->orientAdjust(nodes[i], curOri[i]);
+    nodes[i]->setLeft(curLeft[i]);
+    nodes[i]->setBottom(curBottom[i]);
+    if (orientPtr_ != nullptr) {
+      orientPtr_->orientAdjust(nodes[i], curOri[i]);
     }
   }
 
@@ -262,129 +226,105 @@ double DetailedHPWL::delta(int n, std::vector<Node*>& nodes,
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedHPWL::delta(Node* ndi, double new_x, double new_y) {
+double DetailedHPWL::delta(Node* ndi, double new_x, double new_y)
+{
   // Compute change in wire length for moving node to new position.
 
   double old_wl = 0.;
   double new_wl = 0.;
   double x, y;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
+  Rectangle old_box, new_box;
 
-  ++m_traversal;
-  for (int pi = 0; pi < ndi->getPins().size(); pi++) {
+  ++traversal_;
+  for (int pi = 0; pi < ndi->getNumPins(); pi++) {
     Pin* pini = ndi->getPins()[pi];
 
     Edge* edi = pini->getEdge();
 
-    int npins = edi->getPins().size();
-    if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+    int npins = edi->getNumPins();
+    if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
       continue;
     }
-    if (m_edgeMask[edi->getId()] == m_traversal) {
+    if (edgeMask_[edi->getId()] == traversal_) {
       continue;
     }
-    m_edgeMask[edi->getId()] = m_traversal;
+    edgeMask_[edi->getId()] = traversal_;
 
-    old_xmin = std::numeric_limits<double>::max();
-    old_xmax = -std::numeric_limits<double>::max();
-    old_ymin = std::numeric_limits<double>::max();
-    old_ymax = -std::numeric_limits<double>::max();
-
-    new_xmin = std::numeric_limits<double>::max();
-    new_xmax = -std::numeric_limits<double>::max();
-    new_ymin = std::numeric_limits<double>::max();
-    new_ymax = -std::numeric_limits<double>::max();
-
-    for (int pj = 0; pj < edi->getPins().size(); pj++) {
+    old_box.reset();
+    new_box.reset();
+    for (int pj = 0; pj < edi->getNumPins(); pj++) {
       Pin* pinj = edi->getPins()[pj];
 
       Node* ndj = pinj->getNode();
 
-      x = ndj->getX() + pinj->getOffsetX();
-      y = ndj->getY() + pinj->getOffsetY();
+      x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+      y = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-      old_xmin = std::min(old_xmin, x);
-      old_xmax = std::max(old_xmax, x);
-      old_ymin = std::min(old_ymin, y);
-      old_ymax = std::max(old_ymax, y);
+      old_box.addPt(x, y);
 
       if (ndj == ndi) {
         x = new_x + pinj->getOffsetX();
         y = new_y + pinj->getOffsetY();
       }
-      new_xmin = std::min(new_xmin, x);
-      new_xmax = std::max(new_xmax, x);
-      new_ymin = std::min(new_ymin, y);
-      new_ymax = std::max(new_ymax, y);
+
+      new_box.addPt(x, y);
     }
-    old_wl += old_xmax - old_xmin + old_ymax - old_ymin;
-    new_wl += new_xmax - new_xmin + new_ymax - new_ymin;
+    old_wl += (old_box.getWidth() + old_box.getHeight());
+    new_wl += (new_box.getWidth() + new_box.getHeight());
   }
   return old_wl - new_wl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-void DetailedHPWL::getCandidates(std::vector<Node*>& candidates) {
-  candidates.erase(candidates.begin(), candidates.end());
-  candidates = m_mgrPtr->m_singleHeightCells;
+void DetailedHPWL::getCandidates(std::vector<Node*>& candidates)
+{
+  candidates = mgrPtr_->getSingleHeightCells();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedHPWL::delta(Node* ndi, Node* ndj) {
+double DetailedHPWL::delta(Node* ndi, Node* ndj)
+{
   // Compute change in wire length for swapping the two nodes.
 
   double old_wl = 0.;
   double new_wl = 0.;
   double x, y;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
+  Rectangle old_box, new_box;
   Node* nodes[2];
   nodes[0] = ndi;
   nodes[1] = ndj;
 
-  ++m_traversal;
+  ++traversal_;
   for (int c = 0; c <= 1; c++) {
     Node* ndi = nodes[c];
-    for (int pi = 0; pi < ndi->getPins().size(); pi++) {
+    for (int pi = 0; pi < ndi->getNumPins(); pi++) {
       Pin* pini = ndi->getPins()[pi];
 
       Edge* edi = pini->getEdge();
 
-      //int npins = edi->getNumPins();
-      int npins = edi->getPins().size();
-      if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+      // int npins = edi->getNumPins();
+      int npins = edi->getNumPins();
+      if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
         continue;
       }
-      if (m_edgeMask[edi->getId()] == m_traversal) {
+      if (edgeMask_[edi->getId()] == traversal_) {
         continue;
       }
-      m_edgeMask[edi->getId()] = m_traversal;
+      edgeMask_[edi->getId()] = traversal_;
 
-      old_xmin = std::numeric_limits<double>::max();
-      old_xmax = -std::numeric_limits<double>::max();
-      old_ymin = std::numeric_limits<double>::max();
-      old_ymax = -std::numeric_limits<double>::max();
-
-      new_xmin = std::numeric_limits<double>::max();
-      new_xmax = -std::numeric_limits<double>::max();
-      new_ymin = std::numeric_limits<double>::max();
-      new_ymax = -std::numeric_limits<double>::max();
-
-      for (int pj = 0; pj < edi->getPins().size(); pj++) {
+      old_box.reset();
+      new_box.reset();
+      for (int pj = 0; pj < edi->getNumPins(); pj++) {
         Pin* pinj = edi->getPins()[pj];
 
         Node* ndj = pinj->getNode();
 
-        x = ndj->getX() + pinj->getOffsetX();
-        y = ndj->getY() + pinj->getOffsetY();
+        x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+        y = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-        old_xmin = std::min(old_xmin, x);
-        old_xmax = std::max(old_xmax, x);
-        old_ymin = std::min(old_ymin, y);
-        old_ymax = std::max(old_ymax, y);
+        old_box.addPt(x, y);
 
         if (ndj == nodes[0]) {
           ndj = nodes[1];
@@ -392,17 +332,14 @@ double DetailedHPWL::delta(Node* ndi, Node* ndj) {
           ndj = nodes[0];
         }
 
-        x = ndj->getX() + pinj->getOffsetX();
-        y = ndj->getY() + pinj->getOffsetY();
+        x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+        y = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-        new_xmin = std::min(new_xmin, x);
-        new_xmax = std::max(new_xmax, x);
-        new_ymin = std::min(new_ymin, y);
-        new_ymax = std::max(new_ymax, y);
+        new_box.addPt(x, y);
       }
 
-      old_wl += old_xmax - old_xmin + old_ymax - old_ymin;
-      new_wl += new_xmax - new_xmin + new_ymax - new_ymin;
+      old_wl += (old_box.getWidth() + old_box.getHeight());
+      new_wl += (new_box.getWidth() + new_box.getHeight());
     }
   }
   return old_wl - new_wl;
@@ -410,58 +347,49 @@ double DetailedHPWL::delta(Node* ndi, Node* ndj) {
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedHPWL::delta(Node* ndi, double target_xi, double target_yi,
-                           Node* ndj, double target_xj, double target_yj) {
+double DetailedHPWL::delta(Node* ndi,
+                           double target_xi,
+                           double target_yi,
+                           Node* ndj,
+                           double target_xj,
+                           double target_yj)
+{
   // Compute change in wire length for swapping the two nodes.
 
   double old_wl = 0.;
   double new_wl = 0.;
   double x, y;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
+  Rectangle old_box, new_box;
   Node* nodes[2];
   nodes[0] = ndi;
   nodes[1] = ndj;
 
-  ++m_traversal;
+  ++traversal_;
   for (int c = 0; c <= 1; c++) {
     Node* ndi = nodes[c];
-    for (int pi = 0; pi < ndi->getPins().size(); pi++) {
+    for (int pi = 0; pi < ndi->getNumPins(); pi++) {
       Pin* pini = ndi->getPins()[pi];
 
       Edge* edi = pini->getEdge();
 
-      int npins = edi->getPins().size();
-      if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+      int npins = edi->getNumPins();
+      if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
         continue;
       }
-      if (m_edgeMask[edi->getId()] == m_traversal) {
+      if (edgeMask_[edi->getId()] == traversal_) {
         continue;
       }
-      m_edgeMask[edi->getId()] = m_traversal;
+      edgeMask_[edi->getId()] = traversal_;
 
-      old_xmin = std::numeric_limits<double>::max();
-      old_xmax = -std::numeric_limits<double>::max();
-      old_ymin = std::numeric_limits<double>::max();
-      old_ymax = -std::numeric_limits<double>::max();
-
-      new_xmin = std::numeric_limits<double>::max();
-      new_xmax = -std::numeric_limits<double>::max();
-      new_ymin = std::numeric_limits<double>::max();
-      new_ymax = -std::numeric_limits<double>::max();
-
-      for (int pj = 0; pj < edi->getPins().size(); pj++) {
-        Pin* pinj = edi->getPins()[pj];
-
+      old_box.reset();
+      new_box.reset();
+      for (Pin* pinj : edi->getPins()) {
         Node* curr = pinj->getNode();
 
-        x = curr->getX() + pinj->getOffsetX();
-        y = curr->getY() + pinj->getOffsetY();
+        x = curr->getLeft() + 0.5 * curr->getWidth() + pinj->getOffsetX();
+        y = curr->getBottom() + 0.5 * curr->getHeight() + pinj->getOffsetY();
 
-        old_xmin = std::min(old_xmin, x);
-        old_xmax = std::max(old_xmax, x);
-        old_ymin = std::min(old_ymin, y);
-        old_ymax = std::max(old_ymax, y);
+        old_box.addPt(x, y);
 
         if (curr == nodes[0]) {
           x = target_xi + pinj->getOffsetX();
@@ -471,14 +399,11 @@ double DetailedHPWL::delta(Node* ndi, double target_xi, double target_yi,
           y = target_yj + pinj->getOffsetY();
         }
 
-        new_xmin = std::min(new_xmin, x);
-        new_xmax = std::max(new_xmax, x);
-        new_ymin = std::min(new_ymin, y);
-        new_ymax = std::max(new_ymax, y);
+        new_box.addPt(x, y);
       }
 
-      old_wl += ((old_xmax - old_xmin) + (old_ymax - old_ymin));
-      new_wl += ((new_xmax - new_xmin) + (new_ymax - new_ymin));
+      old_wl += (old_box.getWidth() + old_box.getHeight());
+      new_wl += (new_box.getWidth() + new_box.getHeight());
     }
   }
   return old_wl - new_wl;

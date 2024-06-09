@@ -53,8 +53,8 @@
 
 #elif defined(__linux__) || defined(__linux) || defined(linux) \
     || defined(__gnu_linux__)
-#include <stdio.h>
-
+#include <cstdint>
+#include <cstdio>
 #endif
 
 #else
@@ -87,7 +87,7 @@ size_t getPeakRSS()
     return (size_t) 0L; /* Can't read? */
   }
   close(fd);
-  return (size_t)(psinfo.pr_rssize * 1024L);
+  return (size_t) (psinfo.pr_rssize * 1024L);
 
 #elif defined(__unix__) || defined(__unix) || defined(unix) \
     || (defined(__APPLE__) && defined(__MACH__))
@@ -97,7 +97,7 @@ size_t getPeakRSS()
 #if defined(__APPLE__) && defined(__MACH__)
   return (size_t) rusage.ru_maxrss;
 #else
-  return (size_t)(rusage.ru_maxrss * 1024L);
+  return (size_t) (rusage.ru_maxrss * 1024L);
 #endif
 
 #else
@@ -133,10 +133,11 @@ size_t getCurrentRSS()
 #elif defined(__linux__) || defined(__linux) || defined(linux) \
     || defined(__gnu_linux__)
   /* Linux ---------------------------------------------------- */
-  long rss = 0L;
-  FILE* fp = NULL;
-  if ((fp = fopen("/proc/self/statm", "r")) == NULL)
+  int64_t rss = 0L;
+  FILE* fp = fopen("/proc/self/statm", "r");
+  if (fp == nullptr) {
     return (size_t) 0L; /* Can't open? */
+  }
   if (fscanf(fp, "%*s%ld", &rss) != 1) {
     fclose(fp);
     return (size_t) 0L; /* Can't read? */

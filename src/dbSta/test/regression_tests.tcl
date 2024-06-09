@@ -1,5 +1,9 @@
 record_tests {
+  hierclock    
+  hier2
+  readdb_hier
   constant1
+  make_port
   network_edit1
   sdc_names1
   sdc_names2
@@ -28,6 +32,8 @@ record_tests {
   read_verilog9
   read_verilog10
 
+  report_cell_usage
+
   write_verilog1
   write_verilog2
   write_verilog3
@@ -36,4 +42,6 @@ record_tests {
   write_verilog6
   write_verilog7
   write_verilog8
+
+  write_sdc1
 }

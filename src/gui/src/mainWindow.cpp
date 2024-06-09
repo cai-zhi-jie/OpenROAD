@@ -30,8 +30,12 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#include "mainWindow.h"
+
 #include <QDesktopServices>
 #include <QDesktopWidget>
+#include <QFileDialog>
+#include <QFontDialog>
 #include <QInputDialog>
 #include <QMenu>
 #include <QMenuBar>
@@ -41,26 +45,31 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QWidgetAction>
-#include <map>
-#include <vector>
-#include <QDebug>
-
 #include <iomanip>
+#include <map>
 #include <sstream>
 #include <string>
+#include <vector>
 
+#include "browserWidget.h"
+#include "bufferTreeDescriptor.h"
+#include "chartsWidget.h"
+#include "clockWidget.h"
 #include "dbDescriptors.h"
 #include "displayControls.h"
+#include "drcWidget.h"
+#include "globalConnectDialog.h"
+#include "gui/heatMap.h"
 #include "highlightGroupDialog.h"
 #include "inspector.h"
+#include "layoutTabs.h"
 #include "layoutViewer.h"
-#include "mainWindow.h"
 #include "scriptWidget.h"
 #include "selectHighlightWindow.h"
 #include "staGui.h"
-#include "utl/Logger.h"
 #include "timingWidget.h"
-#include "drcWidget.h"
+#include "utl/Logger.h"
+#include "utl/algorithms.h"
 
 // must be loaded in global namespace
 static void loadQTResources()
@@ -77,21 +86,26 @@ MainWindow::MainWindow(QWidget* parent)
       controls_(new DisplayControls(this)),
       inspector_(new Inspector(selected_, highlighted_, this)),
       script_(new ScriptWidget(this)),
-      viewer_(new LayoutViewer(
+      viewers_(new LayoutTabs(
           controls_,
           script_,
           selected_,
           highlighted_,
           rulers_,
-          [](const std::any& object) { return Gui::get()->makeSelected(object); },
+          Gui::get(),
           [this]() -> bool { return show_dbu_->isChecked(); },
+          [this]() -> bool { return default_ruler_style_->isChecked(); },
           this)),
       selection_browser_(
           new SelectHighlightWindow(selected_, highlighted_, this)),
-      scroll_(new LayoutScroll(viewer_, this)),
       timing_widget_(new TimingWidget(this)),
       drc_viewer_(new DRCWidget(this)),
-      find_dialog_(new FindObjectDialog(this))
+      clock_viewer_(new ClockWidget(this)),
+      hierarchy_widget_(
+          new BrowserWidget(viewers_->getModuleSettings(), controls_, this)),
+      charts_widget_(new ChartsWidget(this)),
+      find_dialog_(new FindObjectDialog(this)),
+      goto_dialog_(new GotoLocationDialog(this, viewers_))
 {
   // Size and position the window
   QSize size = QDesktopWidget().availableGeometry(this).size();
@@ -100,198 +114,262 @@ MainWindow::MainWindow(QWidget* parent)
 
   QFont font("Monospace");
   font.setStyleHint(QFont::Monospace);
-  script_->setFont(font);
+  script_->setWidgetFont(font);
 
-  setCentralWidget(scroll_);
+  setCentralWidget(viewers_);
   addDockWidget(Qt::BottomDockWidgetArea, script_);
   addDockWidget(Qt::BottomDockWidgetArea, selection_browser_);
   addDockWidget(Qt::LeftDockWidgetArea, controls_);
   addDockWidget(Qt::RightDockWidgetArea, inspector_);
+  addDockWidget(Qt::RightDockWidgetArea, hierarchy_widget_);
   addDockWidget(Qt::RightDockWidgetArea, timing_widget_);
   addDockWidget(Qt::RightDockWidgetArea, drc_viewer_);
+  addDockWidget(Qt::RightDockWidgetArea, clock_viewer_);
+  addDockWidget(Qt::RightDockWidgetArea, charts_widget_);
 
   tabifyDockWidget(selection_browser_, script_);
   selection_browser_->hide();
 
+  tabifyDockWidget(inspector_, hierarchy_widget_);
   tabifyDockWidget(inspector_, timing_widget_);
   tabifyDockWidget(inspector_, drc_viewer_);
+  tabifyDockWidget(inspector_, clock_viewer_);
+  tabifyDockWidget(inspector_, charts_widget_);
   drc_viewer_->hide();
+  clock_viewer_->hide();
 
   // Hook up all the signals/slots
-  connect(script_, SIGNAL(tclExiting()), this, SIGNAL(exit()));
-  connect(script_, SIGNAL(commandExecuted(int)), viewer_, SLOT(update()));
-  connect(this,
-          SIGNAL(designLoaded(odb::dbBlock*)),
-          viewer_,
-          SLOT(designLoaded(odb::dbBlock*)));
-  connect(this, SIGNAL(redraw()), viewer_, SLOT(fullRepaint()));
-  connect(this,
-          SIGNAL(designLoaded(odb::dbBlock*)),
+  connect(viewers_,
+          &LayoutTabs::setCurrentBlock,
           controls_,
-          SLOT(designLoaded(odb::dbBlock*)));
-  connect(this,
-          SIGNAL(designLoaded(odb::dbBlock*)),
-          timing_widget_,
-          SLOT(setBlock(odb::dbBlock*)));
+          &DisplayControls::setCurrentBlock);
+  connect(script_, &ScriptWidget::exiting, this, &MainWindow::exit);
+  connect(script_,
+          &ScriptWidget::commandExecuted,
+          viewers_,
+          &LayoutTabs::commandFinishedExecuting);
+  connect(script_,
+          &ScriptWidget::commandAboutToExecute,
+          viewers_,
+          &LayoutTabs::commandAboutToExecute);
+  connect(this, &MainWindow::blockLoaded, viewers_, &LayoutTabs::blockLoaded);
+  connect(this, &MainWindow::redraw, viewers_, &LayoutTabs::fullRepaint);
+  connect(
+      this, &MainWindow::blockLoaded, controls_, &DisplayControls::blockLoaded);
+  connect(
+      this, &MainWindow::blockLoaded, timing_widget_, &TimingWidget::setBlock);
 
-  connect(this, SIGNAL(pause(int)), script_, SLOT(pause(int)));
-  connect(controls_, SIGNAL(changed()), viewer_, SLOT(fullRepaint()));
-  connect(viewer_,
-          SIGNAL(location(int, int)),
-          this,
-          SLOT(setLocation(int, int)));
-  connect(viewer_,
-          SIGNAL(selected(const Selected&, bool)),
-          this,
-          SLOT(setSelected(const Selected&, bool)));
-  connect(viewer_,
-          SIGNAL(addSelected(const Selected&)),
-          this,
-          SLOT(addSelected(const Selected&)));
-  connect(viewer_,
-          SIGNAL(addSelected(const SelectionSet&)),
-          this,
-          SLOT(addSelected(const SelectionSet&)));
-
-  connect(viewer_,
-          SIGNAL(addRuler(int, int, int, int)),
-          this,
-          SLOT(addRuler(int, int, int, int)));
-
-  connect(this, SIGNAL(selectionChanged()), viewer_, SLOT(update()));
-  connect(this, SIGNAL(highlightChanged()), viewer_, SLOT(update()));
-  connect(this, SIGNAL(rulersChanged()), viewer_, SLOT(update()));
-
+  connect(this, &MainWindow::pause, script_, &ScriptWidget::pause);
+  connect(script_,
+          &ScriptWidget::executionPaused,
+          viewers_,
+          &LayoutTabs::executionPaused);
+  connect(
+      controls_, &DisplayControls::changed, viewers_, &LayoutTabs::fullRepaint);
   connect(controls_,
-          SIGNAL(selected(const Selected&)),
+          &DisplayControls::changed,
+          hierarchy_widget_,
+          &BrowserWidget::displayControlsUpdated);
+  connect(viewers_, &LayoutTabs::location, this, &MainWindow::setLocation);
+  connect(viewers_,
+          &LayoutTabs::selected,
           this,
-          SLOT(setSelected(const Selected&)));
+          qOverload<const Selected&, bool>(&MainWindow::setSelected));
+  connect(viewers_,
+          qOverload<const Selected&>(&LayoutTabs::addSelected),
+          this,
+          qOverload<const Selected&>(&MainWindow::addSelected));
+  connect(viewers_,
+          qOverload<const SelectionSet&>(&LayoutTabs::addSelected),
+          this,
+          qOverload<const SelectionSet&>(&MainWindow::addSelected));
+
+  connect(
+      viewers_, &LayoutTabs::addRuler, [this](int x0, int y0, int x1, int y1) {
+        addRuler(x0, y0, x1, y1, "", "", default_ruler_style_->isChecked());
+      });
+
+  connect(
+      this, &MainWindow::selectionChanged, viewers_, &LayoutTabs::fullRepaint);
+  connect(
+      this, &MainWindow::highlightChanged, viewers_, &LayoutTabs::fullRepaint);
+  connect(this, &MainWindow::rulersChanged, viewers_, &LayoutTabs::fullRepaint);
+
+  connect(controls_, &DisplayControls::selected, [=](const Selected& selected) {
+    setSelected(selected);
+  });
 
   connect(inspector_,
-          SIGNAL(selected(const Selected&, bool)),
+          &Inspector::selected,
           this,
-          SLOT(setSelected(const Selected&, bool)));
+          qOverload<const Selected&, bool>(&MainWindow::setSelected));
   connect(inspector_,
-          SIGNAL(addSelected(const Selected&)),
+          &Inspector::addSelected,
           this,
-          SLOT(addSelected(const Selected&)));
+          qOverload<const Selected&>(&MainWindow::addSelected));
   connect(inspector_,
-          SIGNAL(removeSelected(const Selected&)),
+          &Inspector::removeSelected,
           this,
-          SLOT(removeSelected(const Selected&)));
-  connect(this, SIGNAL(selectionChanged(const Selected&)), inspector_, SLOT(update(const Selected&)));
+          &MainWindow::removeSelected);
+  connect(this, &MainWindow::selectionChanged, inspector_, &Inspector::update);
   connect(inspector_,
-          SIGNAL(selectedItemChanged(const Selected&)),
+          &Inspector::selectedItemChanged,
           selection_browser_,
-          SLOT(updateModels()));
+          &SelectHighlightWindow::updateModels);
   connect(inspector_,
-          SIGNAL(selectedItemChanged(const Selected&)),
-          viewer_,
-          SLOT(update()));
+          &Inspector::selectedItemChanged,
+          viewers_,
+          &LayoutTabs::fullRepaint);
   connect(inspector_,
-          SIGNAL(selectedItemChanged(const Selected&)),
+          &Inspector::selectedItemChanged,
           this,
-          SLOT(updateSelectedStatus(const Selected&)));
-  connect(inspector_,
-          SIGNAL(selection(const Selected&)),
-          viewer_,
-          SLOT(selection(const Selected&)));
-  connect(inspector_,
-          SIGNAL(focus(const Selected&)),
-          viewer_,
-          SLOT(selectionFocus(const Selected&)));
+          &MainWindow::updateSelectedStatus);
+  connect(inspector_, &Inspector::selection, viewers_, &LayoutTabs::selection);
+  connect(inspector_, &Inspector::focus, viewers_, &LayoutTabs::selectionFocus);
+  connect(
+      drc_viewer_, &DRCWidget::focus, viewers_, &LayoutTabs::selectionFocus);
   connect(this,
-          SIGNAL(highlightChanged()),
+          &MainWindow::highlightChanged,
           inspector_,
-          SLOT(highlightChanged()));
+          &Inspector::highlightChanged);
+  connect(viewers_,
+          &LayoutTabs::focusNetsChanged,
+          inspector_,
+          &Inspector::focusNetsChanged);
   connect(inspector_,
-          SIGNAL(removeHighlight(const QList<const Selected*>&)),
-          this,
-          SLOT(removeFromHighlighted(const QList<const Selected*>&)));
+          &Inspector::removeHighlight,
+          [=](const QList<const Selected*>& selected) {
+            removeFromHighlighted(selected);
+          });
   connect(inspector_,
-          SIGNAL(addHighlight(const SelectionSet&)),
-          this,
-          SLOT(addHighlighted(const SelectionSet&)));
+          &Inspector::addHighlight,
+          [=](const SelectionSet& selected) { addHighlighted(selected); });
+  connect(
+      inspector_, &Inspector::setCommand, script_, &ScriptWidget::setCommand);
 
+  connect(hierarchy_widget_,
+          &BrowserWidget::select,
+          [=](const SelectionSet& selected) { setSelected(selected); });
+  connect(hierarchy_widget_,
+          &BrowserWidget::removeSelect,
+          this,
+          &MainWindow::removeSelected);
+  connect(hierarchy_widget_,
+          &BrowserWidget::highlight,
+          [=](const SelectionSet& selected) { addHighlighted(selected); });
+  connect(hierarchy_widget_,
+          &BrowserWidget::removeHighlight,
+          this,
+          &MainWindow::removeHighlighted);
+  connect(hierarchy_widget_,
+          &BrowserWidget::updateModuleVisibility,
+          viewers_,
+          &LayoutTabs::updateModuleVisibility);
+  connect(hierarchy_widget_,
+          &BrowserWidget::updateModuleColor,
+          viewers_,
+          &LayoutTabs::updateModuleColor);
+
+  connect(
+      timing_widget_, &TimingWidget::inspect, [this](const Selected& selected) {
+        inspector_->inspect(selected);
+        inspector_->raise();
+      });
   connect(selection_browser_,
-          SIGNAL(selected(const Selected&)),
+          &SelectHighlightWindow::selected,
           inspector_,
-          SLOT(inspect(const Selected&)));
+          &Inspector::inspect);
   connect(this,
-          SIGNAL(selectionChanged()),
+          &MainWindow::selectionChanged,
           selection_browser_,
-          SLOT(updateSelectionModel()));
+          &SelectHighlightWindow::updateSelectionModel);
   connect(this,
-          SIGNAL(highlightChanged()),
+          &MainWindow::highlightChanged,
           selection_browser_,
-          SLOT(updateHighlightModel()));
+          &SelectHighlightWindow::updateHighlightModel);
+  connect(clock_viewer_,
+          &ClockWidget::selected,
+          this,
+          qOverload<const Selected&>(&MainWindow::addSelected));
 
   connect(selection_browser_,
           &SelectHighlightWindow::clearAllSelections,
-          this,
-          [this]() { this->setSelected(Selected(), false); });
+          [this] { this->setSelected(Selected(), false); });
   connect(selection_browser_,
           &SelectHighlightWindow::clearAllHighlights,
-          this,
-          [this]() { this->clearHighlighted(); });
+          [this] { this->clearHighlighted(); });
   connect(selection_browser_,
-          SIGNAL(clearSelectedItems(const QList<const Selected*>&)),
+          &SelectHighlightWindow::clearSelectedItems,
           this,
-          SLOT(removeFromSelected(const QList<const Selected*>&)));
+          &MainWindow::removeFromSelected);
 
   connect(selection_browser_,
-          SIGNAL(zoomInToItems(const QList<const Selected*>&)),
+          &SelectHighlightWindow::zoomInToItems,
           this,
-          SLOT(zoomInToItems(const QList<const Selected*>&)));
+          &MainWindow::zoomInToItems);
 
   connect(selection_browser_,
-          SIGNAL(clearHighlightedItems(const QList<const Selected*>&)),
-          this,
-          SLOT(removeFromHighlighted(const QList<const Selected*>&)));
+          &SelectHighlightWindow::clearHighlightedItems,
+          [=](const QList<const Selected*>& selected) {
+            removeFromHighlighted(selected);
+          });
 
   connect(selection_browser_,
-          SIGNAL(highlightSelectedItemsSig(const QList<const Selected*>&)),
-          this,
-          SLOT(updateHighlightedSet(const QList<const Selected*>&)));
+          &SelectHighlightWindow::highlightSelectedItemsSig,
+          [=](const QList<const Selected*>& items) {
+            updateHighlightedSet(items);
+          });
 
   connect(timing_widget_,
-          SIGNAL(highlightTimingPath(TimingPath*)),
-          viewer_,
-          SLOT(update()));
+          &TimingWidget::highlightTimingPath,
+          viewers_,
+          qOverload<>(&LayoutTabs::update));
 
-  connect(this,
-          SIGNAL(designLoaded(odb::dbBlock*)),
+  connect(timing_widget_,
+          &TimingWidget::setCommand,
+          script_,
+          &ScriptWidget::setCommand);
+#ifdef ENABLE_CHARTS
+  connect(charts_widget_,
+          &ChartsWidget::endPointsToReport,
           this,
-          SLOT(setBlock(odb::dbBlock*)));
+          &MainWindow::reportSlackHistogramPaths);
+#endif
+
+  connect(this, &MainWindow::blockLoaded, this, &MainWindow::setBlock);
+  connect(this, &MainWindow::blockLoaded, drc_viewer_, &DRCWidget::setBlock);
+  connect(
+      this, &MainWindow::blockLoaded, clock_viewer_, &ClockWidget::setBlock);
+  connect(drc_viewer_, &DRCWidget::selectDRC, [this](const Selected& selected) {
+    setSelected(selected, false);
+    odb::Rect bbox;
+    selected.getBBox(bbox);
+
+    auto* block = getBlock();
+    int zoomout_dist = std::numeric_limits<int>::max();
+    if (block != nullptr) {
+      // 10 microns
+      zoomout_dist = 10 * block->getDbUnitsPerMicron();
+    }
+    // twice the largest dimension of bounding box
+    const int zoomout_box = 2 * std::max(bbox.dx(), bbox.dy());
+    // pick smallest
+    const int zoomout_margin = std::min(zoomout_dist, zoomout_box);
+    bbox.set_xlo(bbox.xMin() - zoomout_margin);
+    bbox.set_ylo(bbox.yMin() - zoomout_margin);
+    bbox.set_xhi(bbox.xMax() + zoomout_margin);
+    bbox.set_yhi(bbox.yMax() + zoomout_margin);
+    zoomTo(bbox);
+  });
+  connect(this, &MainWindow::selectionChanged, [this]() {
+    if (!selected_.empty()) {
+      drc_viewer_->updateSelection(*selected_.begin());
+    }
+  });
   connect(this,
-          SIGNAL(designLoaded(odb::dbBlock*)),
-          drc_viewer_,
-          SLOT(setBlock(odb::dbBlock*)));
-  connect(drc_viewer_,
-          &DRCWidget::selectDRC,
-          [this](const Selected& selected) {
-            setSelected(selected, false);
-            odb::Rect bbox;
-            selected.getBBox(bbox);
-            // 10 microns
-            const int zoomout_dist = 10 * getBlock()->getDbUnitsPerMicron();
-            // twice the largest dimension of bounding box
-            const int zoomout_box = 2 * std::max(bbox.dx(), bbox.dy());
-            // pick smallest
-            const int zoomout_margin = std::min(zoomout_dist, zoomout_box);
-            bbox.set_xlo(bbox.xMin() - zoomout_margin);
-            bbox.set_ylo(bbox.yMin() - zoomout_margin);
-            bbox.set_xhi(bbox.xMax() + zoomout_margin);
-            bbox.set_yhi(bbox.yMax() + zoomout_margin);
-            zoomTo(bbox);
-          });
-  connect(this,
-          &MainWindow::selectionChanged,
-          [this]() {
-            if (!selected_.empty()) {
-              drc_viewer_->updateSelection(*selected_.begin());
-            }
-          });
+          &MainWindow::displayUnitsChanged,
+          goto_dialog_,
+          &GotoLocationDialog::updateUnits);
 
   createActions();
   createToolbars();
@@ -303,79 +381,147 @@ MainWindow::MainWindow(QWidget* parent)
   settings.beginGroup("main");
   restoreGeometry(settings.value("geometry").toByteArray());
   restoreState(settings.value("state").toByteArray());
-  hide_option_->setChecked(settings.value("check_exit", hide_option_->isChecked()).toBool());
-  show_dbu_->setChecked(settings.value("use_dbu", show_dbu_->isChecked()).toBool());
+  QApplication::setFont(
+      settings.value("font", QApplication::font()).value<QFont>());
+  hide_option_->setChecked(
+      settings.value("check_exit", hide_option_->isChecked()).toBool());
+  show_dbu_->setChecked(
+      settings.value("use_dbu", show_dbu_->isChecked()).toBool());
+  default_ruler_style_->setChecked(
+      settings.value("ruler_style", default_ruler_style_->isChecked())
+          .toBool());
   script_->readSettings(&settings);
   controls_->readSettings(&settings);
   timing_widget_->readSettings(&settings);
+  hierarchy_widget_->readSettings(&settings);
   settings.endGroup();
 
   // load resources and set window icon and title
   loadQTResources();
   setWindowIcon(QIcon(":/icon.png"));
-  setWindowTitle("OpenROAD");
+  setWindowTitle(window_title_);
 
-  Descriptor::Property::convert_dbu = [this](int value, bool add_units) -> std::string {
+  Descriptor::Property::convert_dbu
+      = [this](int value, bool add_units) -> std::string {
     return convertDBUToString(value, add_units);
   };
-  Descriptor::Property::convert_string = [this](const std::string& value, bool* ok) -> int {
+  Descriptor::Property::convert_string
+      = [this](const std::string& value, bool* ok) -> int {
     return convertStringToDBU(value, ok);
   };
 }
 
 MainWindow::~MainWindow()
 {
-  // unregister descriptors
-  Gui::get()->unregisterDescriptor<Ruler*>();
+  auto* gui = Gui::get();
+  // unregister descriptors with GUI dependencies
+  gui->unregisterDescriptor<Ruler*>();
+  gui->unregisterDescriptor<odb::dbNet*>();
+  gui->unregisterDescriptor<DbNetDescriptor::NetWithSink>();
+  gui->unregisterDescriptor<BufferTree>();
 }
 
 void MainWindow::setDatabase(odb::dbDatabase* db)
 {
-  // set database and pass along
   db_ = db;
-  controls_->setDb(db_);
-
-  auto* chip = db->getChip();
-  if (chip != nullptr) {
-    viewer_->designLoaded(chip->getBlock());
-  }
 }
 
 void MainWindow::setBlock(odb::dbBlock* block)
 {
-  for (auto* heat_map : getHeatMaps()) {
+  if (block != nullptr) {
+    const std::string title
+        = fmt::format("{} - {}", window_title_, block->getName());
+    setWindowTitle(QString::fromStdString(title));
+  }
+  for (auto* heat_map : Gui::get()->getHeatMaps()) {
     heat_map->setBlock(block);
   }
+  hierarchy_widget_->setBlock(block);
 }
 
 void MainWindow::init(sta::dbSta* sta)
 {
-  // Setup timing widget
+  // Setup widgets
   timing_widget_->init(sta);
+  controls_->setSTA(sta);
+  hierarchy_widget_->setSTA(sta);
+  clock_viewer_->setSTA(sta);
+#ifdef ENABLE_CHARTS
+  charts_widget_->setSTA(sta);
+#endif
 
   // register descriptors
   auto* gui = Gui::get();
-  gui->registerDescriptor<odb::dbInst*>(new DbInstDescriptor(db_, sta));
+  auto* inst_descriptor = new DbInstDescriptor(db_, sta);
+  gui->registerDescriptor<odb::dbInst*>(inst_descriptor);
   gui->registerDescriptor<odb::dbMaster*>(new DbMasterDescriptor(db_, sta));
-  gui->registerDescriptor<odb::dbNet*>(new DbNetDescriptor(db_));
+  gui->registerDescriptor<odb::dbNet*>(
+      new DbNetDescriptor(db_,
+                          sta,
+                          viewers_->getFocusNets(),
+                          viewers_->getRouteGuides(),
+                          viewers_->getNetTracks()));
+  gui->registerDescriptor<DbNetDescriptor::NetWithSink>(
+      new DbNetDescriptor(db_,
+                          sta,
+                          viewers_->getFocusNets(),
+                          viewers_->getRouteGuides(),
+                          viewers_->getNetTracks()));
   gui->registerDescriptor<odb::dbITerm*>(new DbITermDescriptor(db_));
   gui->registerDescriptor<odb::dbBTerm*>(new DbBTermDescriptor(db_));
+  gui->registerDescriptor<odb::dbVia*>(new DbViaDescriptor(db_));
   gui->registerDescriptor<odb::dbBlockage*>(new DbBlockageDescriptor(db_));
-  gui->registerDescriptor<odb::dbObstruction*>(new DbObstructionDescriptor(db_));
+  gui->registerDescriptor<odb::dbObstruction*>(
+      new DbObstructionDescriptor(db_));
   gui->registerDescriptor<odb::dbTechLayer*>(new DbTechLayerDescriptor(db_));
+  gui->registerDescriptor<DbTermAccessPoint>(
+      new DbTermAccessPointDescriptor(db_));
+  gui->registerDescriptor<odb::dbGroup*>(new DbGroupDescriptor(db_));
+  gui->registerDescriptor<odb::dbRegion*>(new DbRegionDescriptor(db_));
+  gui->registerDescriptor<odb::dbModule*>(new DbModuleDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechVia*>(new DbTechViaDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechViaRule*>(
+      new DbTechViaRuleDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechViaLayerRule*>(
+      new DbTechViaLayerRuleDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechViaGenerateRule*>(
+      new DbGenerateViaDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechNonDefaultRule*>(
+      new DbNonDefaultRuleDescriptor(db_));
+  gui->registerDescriptor<odb::dbTechLayerRule*>(
+      new DbTechLayerRuleDescriptor());
+  gui->registerDescriptor<odb::dbTechSameNetRule*>(
+      new DbTechSameNetRuleDescriptor(db_));
+  gui->registerDescriptor<odb::dbSite*>(new DbSiteDescriptor(db_));
+  gui->registerDescriptor<DbSiteDescriptor::SpecificSite>(
+      new DbSiteDescriptor(db_));
+  gui->registerDescriptor<odb::dbRow*>(new DbRowDescriptor(db_));
   gui->registerDescriptor<Ruler*>(new RulerDescriptor(rulers_, db_));
+  gui->registerDescriptor<odb::dbBlock*>(new DbBlockDescriptor(db_));
+  gui->registerDescriptor<odb::dbTech*>(new DbTechDescriptor(db_));
+  gui->registerDescriptor<odb::dbMetalWidthViaMap*>(
+      new DbMetalWidthViaMapDescriptor(db_));
 
-  // renderers
-  power_density_data_.setSTA(sta);
-  for (auto* heat_map : getHeatMaps()) {
-    gui->registerRenderer(heat_map->getRenderer());
-  }
+  gui->registerDescriptor<BufferTree>(
+      new BufferTreeDescriptor(db_,
+                               sta,
+                               viewers_->getFocusNets(),
+                               viewers_->getRouteGuides(),
+                               viewers_->getNetTracks()));
+
+  controls_->setDBInstDescriptor(inst_descriptor);
+  hierarchy_widget_->setDBInstDescriptor(inst_descriptor);
 }
 
 void MainWindow::createStatusBar()
 {
   location_ = new QLabel(this);
   statusBar()->addPermanentWidget(location_);
+}
+
+LayoutViewer* MainWindow::getLayoutViewer() const
+{
+  return viewers_->getCurrent();
 }
 
 odb::dbBlock* MainWindow::getBlock() const
@@ -401,11 +547,17 @@ void MainWindow::createActions()
   hide_option_->setChecked(true);
   exit_ = new QAction("Exit", this);
 
+  open_ = new QAction("Open DB", this);
+
   fit_ = new QAction("Fit", this);
   fit_->setShortcut(QString("F"));
 
   find_ = new QAction("Find", this);
   find_->setShortcut(QString("Ctrl+F"));
+
+  goto_position_ = new QAction("Go to position", this);
+  goto_position_->setShortcut(QString("Shift+G"));
+
   zoom_in_ = new QAction("Zoom in", this);
   zoom_in_->setShortcut(QString("Z"));
 
@@ -428,52 +580,105 @@ void MainWindow::createActions()
   show_dbu_->setCheckable(true);
   show_dbu_->setChecked(false);
 
-  connect(hide_, SIGNAL(triggered()), this, SIGNAL(hide()));
-  connect(exit_, SIGNAL(triggered()), this, SIGNAL(exit()));
-  connect(fit_, SIGNAL(triggered()), viewer_, SLOT(fit()));
-  connect(zoom_in_, SIGNAL(triggered()), viewer_, SLOT(zoomIn()));
-  connect(zoom_out_, SIGNAL(triggered()), viewer_, SLOT(zoomOut()));
-  connect(find_, SIGNAL(triggered()), this, SLOT(showFindDialog()));
-  connect(inspect_, SIGNAL(triggered()), inspector_, SLOT(show()));
-  connect(timing_debug_, SIGNAL(triggered()), timing_widget_, SLOT(show()));
-  connect(help_, SIGNAL(triggered()), this, SLOT(showHelp()));
+  default_ruler_style_ = new QAction("Make euclidian rulers", this);
+  default_ruler_style_->setCheckable(true);
+  default_ruler_style_->setChecked(true);
 
-  connect(build_ruler_, SIGNAL(triggered()), viewer_, SLOT(startRulerBuild()));
+  font_ = new QAction("Application font", this);
 
-  connect(show_dbu_, SIGNAL(toggled(bool)), viewer_, SLOT(fullRepaint()));
-  connect(show_dbu_, SIGNAL(toggled(bool)), inspector_, SLOT(reload()));
-  connect(show_dbu_, SIGNAL(toggled(bool)), selection_browser_, SLOT(updateModels()));
-  connect(show_dbu_, SIGNAL(toggled(bool)), this, SLOT(setUseDBU(bool)));
-  connect(show_dbu_, SIGNAL(toggled(bool)), this, SLOT(setClearLocation()));
+  global_connect_ = new QAction("Global connect", this);
+  global_connect_->setShortcut(QString("Ctrl+G"));
+
+  connect(open_, &QAction::triggered, this, &MainWindow::openDesign);
+  connect(
+      this, &MainWindow::blockLoaded, [this]() { open_->setEnabled(false); });
+  connect(hide_, &QAction::triggered, this, &MainWindow::hide);
+  connect(exit_, &QAction::triggered, this, &MainWindow::exit);
+  connect(this, &MainWindow::exit, viewers_, &LayoutTabs::exit);
+  connect(fit_, &QAction::triggered, viewers_, &LayoutTabs::fit);
+  connect(zoom_in_,
+          &QAction::triggered,
+          viewers_,
+          qOverload<>(&LayoutTabs::zoomIn));
+  connect(zoom_out_,
+          &QAction::triggered,
+          viewers_,
+          qOverload<>(&LayoutTabs::zoomOut));
+  connect(find_, &QAction::triggered, this, &MainWindow::showFindDialog);
+  connect(
+      goto_position_, &QAction::triggered, this, &MainWindow::showGotoDialog);
+  connect(inspect_, &QAction::triggered, inspector_, &Inspector::show);
+  connect(
+      timing_debug_, &QAction::triggered, timing_widget_, &TimingWidget::show);
+  connect(help_, &QAction::triggered, this, &MainWindow::showHelp);
+
+  connect(build_ruler_,
+          &QAction::triggered,
+          viewers_,
+          &LayoutTabs::startRulerBuild);
+
+  connect(show_dbu_, &QAction::toggled, viewers_, &LayoutTabs::fullRepaint);
+  connect(show_dbu_, &QAction::toggled, inspector_, &Inspector::reload);
+  connect(show_dbu_,
+          &QAction::toggled,
+          selection_browser_,
+          &SelectHighlightWindow::updateModels);
+  connect(show_dbu_, &QAction::toggled, this, &MainWindow::setUseDBU);
+  connect(show_dbu_, &QAction::toggled, this, &MainWindow::setClearLocation);
+
+  connect(font_, &QAction::triggered, this, &MainWindow::showApplicationFont);
+
+  connect(global_connect_,
+          &QAction::triggered,
+          this,
+          &MainWindow::showGlobalConnect);
 }
 
 void MainWindow::setUseDBU(bool use_dbu)
 {
-  for (auto* heat_map : getHeatMaps()) {
+  for (auto* heat_map : Gui::get()->getHeatMaps()) {
     heat_map->setUseDBU(use_dbu);
+  }
+  auto* block = getBlock();
+  if (block != nullptr) {
+    emit displayUnitsChanged(block->getDbUnitsPerMicron(), use_dbu);
+  }
+}
+
+void MainWindow::showApplicationFont()
+{
+  bool okay = false;
+  QFont font = QFontDialog::getFont(
+      &okay, QApplication::font(), this, "Application font");
+
+  if (okay) {
+    QApplication::setFont(font);
+    update();
   }
 }
 
 void MainWindow::createMenus()
 {
   file_menu_ = menuBar()->addMenu("&File");
+  file_menu_->addAction(open_);
   file_menu_->addAction(hide_);
   file_menu_->addAction(exit_);
 
   view_menu_ = menuBar()->addMenu("&View");
   view_menu_->addAction(fit_);
   view_menu_->addAction(find_);
+  view_menu_->addAction(goto_position_);
   view_menu_->addAction(zoom_in_);
   view_menu_->addAction(zoom_out_);
 
   tools_menu_ = menuBar()->addMenu("&Tools");
   tools_menu_->addAction(build_ruler_);
   auto heat_maps = tools_menu_->addMenu("&Heat maps");
-  for (auto* heat_map : getHeatMaps()) {
-    connect(heat_maps->addAction(QString::fromStdString(heat_map->getName())),
-            &QAction::triggered,
-            [heat_map]() { heat_map->showSetup(); });
+  heat_maps->setObjectName("HeatMaps");
+  for (auto* heat_map : Gui::get()->getHeatMaps()) {
+    registerHeatMap(heat_map);
   }
+  tools_menu_->addAction(global_connect_);
 
   windows_menu_ = menuBar()->addMenu("&Windows");
   windows_menu_->addAction(controls_->toggleViewAction());
@@ -483,10 +688,15 @@ void MainWindow::createMenus()
   windows_menu_->addAction(view_tool_bar_->toggleViewAction());
   windows_menu_->addAction(timing_widget_->toggleViewAction());
   windows_menu_->addAction(drc_viewer_->toggleViewAction());
+  windows_menu_->addAction(clock_viewer_->toggleViewAction());
+  windows_menu_->addAction(hierarchy_widget_->toggleViewAction());
+  windows_menu_->addAction(charts_widget_->toggleViewAction());
 
   auto option_menu = menuBar()->addMenu("&Options");
   option_menu->addAction(hide_option_);
   option_menu->addAction(show_dbu_);
+  option_menu->addAction(default_ruler_style_);
+  option_menu->addAction(font_);
 
   menuBar()->addAction(help_);
 }
@@ -502,10 +712,10 @@ void MainWindow::createToolbars()
   view_tool_bar_->setObjectName("view_toolbar");  // for settings
 }
 
-const std::string MainWindow::addToolbarButton(const std::string& name,
-                                               const QString& text,
-                                               const QString& script,
-                                               bool echo)
+std::string MainWindow::addToolbarButton(const std::string& name,
+                                         const QString& text,
+                                         const QString& script,
+                                         bool echo)
 {
   // ensure key is unique
   std::string key;
@@ -558,7 +768,7 @@ QMenu* MainWindow::findMenu(QStringList& path, QMenu* parent)
 
   auto cleanupText = [](const QString& text) -> QString {
     QString text_cpy = text;
-    text_cpy.replace(QRegExp("&(?!&)"), ""); // remove single &, but keep &&
+    text_cpy.replace(QRegExp("&(?!&)"), "");  // remove single &, but keep &&
     return text_cpy;
   };
 
@@ -591,12 +801,12 @@ QMenu* MainWindow::findMenu(QStringList& path, QMenu* parent)
   return findMenu(path, menu);
 }
 
-const std::string MainWindow::addMenuItem(const std::string& name,
-                                          const QString& path,
-                                          const QString& text,
-                                          const QString& script,
-                                          const QString& shortcut,
-                                          bool echo)
+std::string MainWindow::addMenuItem(const std::string& name,
+                                    const QString& path,
+                                    const QString& text,
+                                    const QString& script,
+                                    const QString& shortcut,
+                                    bool echo)
 {
   // ensure key is unique
   std::string key;
@@ -680,11 +890,10 @@ void MainWindow::removeMenuItem(const std::string& name)
   menu_actions_.erase(name);
 }
 
-const std::string MainWindow::requestUserInput(const QString& title, const QString& question)
+std::string MainWindow::requestUserInput(const QString& title,
+                                         const QString& question)
 {
-  QString text = QInputDialog::getText(this,
-                                       title,
-                                       question);
+  QString text = QInputDialog::getText(this, title, question);
   return text.toStdString();
 }
 
@@ -725,10 +934,21 @@ void MainWindow::removeSelected(const Selected& selection)
   }
 }
 
+void MainWindow::removeHighlighted(const Selected& selection)
+{
+  for (auto& group : highlighted_) {
+    auto itr = std::find(group.begin(), group.end(), selection);
+    if (itr != group.end()) {
+      group.erase(itr);
+      emit highlightChanged();
+    }
+  }
+}
+
 void MainWindow::removeSelectedByType(const std::string& type)
 {
   bool changed = false;
-  for (auto itr = selected_.begin(); itr != selected_.end(); ) {
+  for (auto itr = selected_.begin(); itr != selected_.end();) {
     const auto& selection = *itr;
 
     if (selection.getTypeName() == type) {
@@ -752,16 +972,24 @@ void MainWindow::addSelected(const SelectionSet& selections)
       selected_.insert(selection);
     }
   }
-  status(std::string("Added ") + std::to_string(selected_.size() - prev_selected_size));
+  status(std::string("Added ")
+         + std::to_string(selected_.size() - prev_selected_size));
   emit selectionChanged();
+}
+
+void MainWindow::setSelected(const SelectionSet& selections)
+{
+  selected_.clear();
+  addSelected(selections);
 }
 
 void MainWindow::setSelected(const Selected& selection, bool show_connectivity)
 {
   selected_.clear();
   addSelected(selection);
-  if (show_connectivity)
+  if (show_connectivity) {
     selectHighlightConnectedNets(true, true, true, false);
+  }
 
   emit selectionChanged();
 }
@@ -771,6 +999,9 @@ void MainWindow::addHighlighted(const SelectionSet& highlights,
 {
   if (highlight_group < 0) {
     highlight_group = requestHighlightGroup();
+    if (highlight_group < 0) {
+      return;
+    }
   }
 
   if (highlight_group >= highlighted_.size()) {
@@ -786,15 +1017,24 @@ void MainWindow::addHighlighted(const SelectionSet& highlights,
   emit highlightChanged();
 }
 
-std::string MainWindow::addRuler(int x0, int y0, int x1, int y1, const std::string& label, const std::string& name)
+std::string MainWindow::addRuler(int x0,
+                                 int y0,
+                                 int x1,
+                                 int y1,
+                                 const std::string& label,
+                                 const std::string& name,
+                                 bool euclidian)
 {
-  auto new_ruler = std::make_unique<Ruler>(odb::Point(x0, y0), odb::Point(x1, y1), name, label);
+  auto new_ruler = std::make_unique<Ruler>(
+      odb::Point(x0, y0), odb::Point(x1, y1), name, label);
+  new_ruler->setEuclidian(euclidian);
   std::string new_name = new_ruler->getName();
 
   // check if ruler name is unique
   for (const auto& ruler : rulers_) {
     if (new_name == ruler->getName()) {
-      logger_->warn(utl::GUI, 24, "Ruler with name \"{}\" already exists", new_name);
+      logger_->warn(
+          utl::GUI, 24, "Ruler with name \"{}\" already exists", new_name);
       return "";
     }
   }
@@ -806,9 +1046,10 @@ std::string MainWindow::addRuler(int x0, int y0, int x1, int y1, const std::stri
 
 void MainWindow::deleteRuler(const std::string& name)
 {
-  auto ruler_find = std::find_if(rulers_.begin(), rulers_.end(), [name](const auto& l) {
-    return l->getName() == name;
-  });
+  auto ruler_find
+      = std::find_if(rulers_.begin(), rulers_.end(), [name](const auto& l) {
+          return l->getName() == name;
+        });
   if (ruler_find != rulers_.end()) {
     // remove from selected set
     auto remove_selected = Gui::get()->makeSelected(ruler_find->get());
@@ -824,7 +1065,9 @@ void MainWindow::deleteRuler(const std::string& name)
 int MainWindow::requestHighlightGroup()
 {
   HighlightGroupDialog dlg;
-  dlg.exec();
+  if (dlg.exec() == QDialog::Rejected) {
+    return -1;
+  }
   return dlg.getSelectedHighlightGroup();
 }
 
@@ -833,22 +1076,33 @@ void MainWindow::updateHighlightedSet(const QList<const Selected*>& items,
 {
   if (highlight_group < 0) {
     highlight_group = requestHighlightGroup();
+    if (highlight_group < 0) {
+      return;
+    }
   }
 
   if (highlight_group >= highlighted_.size()) {
     return;
   }
 
+  // Hold on to selected items as the pointers will be invalid
+  QList<Selected> items_storage;
   for (auto item : items) {
-    highlighted_[highlight_group].insert(*item);
+    items_storage.push_back(*item);
   }
+  // Remove any items that might already be selected
+  removeFromHighlighted(items);
+
+  highlighted_[highlight_group].insert(items_storage.begin(),
+                                       items_storage.end());
   emit highlightChanged();
 }
 
 void MainWindow::clearHighlighted(int highlight_group)
 {
-  if (highlighted_.empty())
+  if (highlighted_.empty()) {
     return;
+  }
   int num_items_cleared = 0;
   if (highlight_group < 0) {
     for (auto& highlighted_set : highlighted_) {
@@ -859,22 +1113,26 @@ void MainWindow::clearHighlighted(int highlight_group)
     num_items_cleared += highlighted_[highlight_group].size();
     highlighted_[highlight_group].clear();
   }
-  if (num_items_cleared > 0)
+  if (num_items_cleared > 0) {
     emit highlightChanged();
+  }
 }
 
 void MainWindow::clearRulers()
 {
-  if (rulers_.empty())
+  if (rulers_.empty()) {
     return;
+  }
+  Gui::get()->removeSelected<Ruler*>();
   rulers_.clear();
   emit rulersChanged();
 }
 
 void MainWindow::removeFromSelected(const QList<const Selected*>& items)
 {
-  if (items.empty())
+  if (items.empty()) {
     return;
+  }
   for (auto& item : items) {
     selected_.erase(*item);
   }
@@ -884,12 +1142,14 @@ void MainWindow::removeFromSelected(const QList<const Selected*>& items)
 void MainWindow::removeFromHighlighted(const QList<const Selected*>& items,
                                        int highlight_group)
 {
-  if (items.empty())
+  if (items.empty()) {
     return;
+  }
   if (highlight_group < 0) {
     for (auto& item : items) {
-      for (auto& highlighted_set : highlighted_)
+      for (auto& highlighted_set : highlighted_) {
         highlighted_set.erase(*item);
+      }
     }
   } else if (highlight_group < highlighted_.size()) {
     for (auto& item : items) {
@@ -902,13 +1162,14 @@ void MainWindow::removeFromHighlighted(const QList<const Selected*>& items,
 
 void MainWindow::zoomTo(const odb::Rect& rect_dbu)
 {
-  viewer_->zoomTo(rect_dbu);
+  viewers_->zoomTo(rect_dbu);
 }
 
 void MainWindow::zoomInToItems(const QList<const Selected*>& items)
 {
-  if (items.empty())
+  if (items.empty()) {
     return;
+  }
   odb::Rect items_bbox;
   items_bbox.mergeInit();
   int merge_cnt = 0;
@@ -919,8 +1180,9 @@ void MainWindow::zoomInToItems(const QList<const Selected*>& items)
       items_bbox.merge(item_bbox);
     }
   }
-  if (merge_cnt == 0)
+  if (merge_cnt == 0) {
     return;
+  }
   zoomTo(items_bbox);
 }
 
@@ -931,9 +1193,18 @@ void MainWindow::status(const std::string& message)
 
 void MainWindow::showFindDialog()
 {
+  if (getBlock() == nullptr) {
+    return;
+  }
+  find_dialog_->exec();
+}
+
+void MainWindow::showGotoDialog()
+{
   if (getBlock() == nullptr)
     return;
-  find_dialog_->exec();
+
+  goto_dialog_->show_init();
 }
 
 void MainWindow::showHelp()
@@ -942,9 +1213,9 @@ void MainWindow::showHelp()
   if (!QDesktopServices::openUrl(help_url)) {
     // failed to open
     logger_->warn(utl::GUI,
-                 23,
-                 "Failed to open help automatically, navigate to: {}",
-                 help_url.toString().toStdString());
+                  23,
+                  "Failed to open help automatically, navigate to: {}",
+                  help_url.toString().toStdString());
   }
 }
 
@@ -953,17 +1224,19 @@ bool MainWindow::anyObjectInSet(bool selection_set, odb::dbObjectType obj_type)
   if (selection_set) {
     for (auto& selected_obj : selected_) {
       if ((selected_obj.isInst() && obj_type == odb::dbInstObj)
-          || (selected_obj.isNet() && obj_type == odb::dbNetObj))
+          || (selected_obj.isNet() && obj_type == odb::dbNetObj)) {
         return true;
+      }
     }
     return false;
-  } else {
-    for (auto& highlight_set : highlighted_) {
-      for (auto& selected_obj : highlight_set) {
-        if (selected_obj.isInst() && obj_type == odb::dbInstObj)
-          return true;
-        if (selected_obj.isNet() && obj_type == odb::dbNetObj)
-          return true;
+  }
+  for (auto& highlight_set : highlighted_) {
+    for (auto& selected_obj : highlight_set) {
+      if (selected_obj.isInst() && obj_type == odb::dbInstObj) {
+        return true;
+      }
+      if (selected_obj.isNet() && obj_type == odb::dbNetObj) {
+        return true;
       }
     }
   }
@@ -982,12 +1255,14 @@ void MainWindow::selectHighlightConnectedInsts(bool select_flag,
       }
     }
   }
-  if (connected_insts.empty())
+  if (connected_insts.empty()) {
     return;
-  if (select_flag)
+  }
+  if (select_flag) {
     addSelected(connected_insts);
-  else
+  } else {
     addHighlighted(connected_insts, highlight_group);
+  }
 }
 
 void MainWindow::selectHighlightConnectedNets(bool select_flag,
@@ -996,32 +1271,73 @@ void MainWindow::selectHighlightConnectedNets(bool select_flag,
                                               int highlight_group)
 {
   SelectionSet connected_nets;
-  for (auto sel_obj : selected_) {
+  for (auto& sel_obj : selected_) {
     if (sel_obj.isInst()) {
       auto inst_obj = std::any_cast<odb::dbInst*>(sel_obj.getObject());
       for (auto inst_term : inst_obj->getITerms()) {
         if (inst_term->getNet() == nullptr
-            || inst_term->getNet()->getSigType() != odb::dbSigType::SIGNAL)
+            || inst_term->getNet()->getSigType() != odb::dbSigType::SIGNAL) {
           continue;
+        }
         auto inst_term_dir = inst_term->getIoType();
 
         if (output
             && (inst_term_dir == odb::dbIoType::OUTPUT
-                || inst_term_dir == odb::dbIoType::INOUT))
+                || inst_term_dir == odb::dbIoType::INOUT)) {
           connected_nets.insert(Gui::get()->makeSelected(inst_term->getNet()));
+        }
         if (input
             && (inst_term_dir == odb::dbIoType::INPUT
-                || inst_term_dir == odb::dbIoType::INOUT))
-          connected_nets.insert(Gui::get()->makeSelected(inst_term->getNet(), inst_term));
+                || inst_term_dir == odb::dbIoType::INOUT)) {
+          connected_nets.insert(Gui::get()->makeSelected(
+              DbNetDescriptor::NetWithSink{inst_term->getNet(), inst_term}));
+        }
       }
     }
   }
-  if (connected_nets.empty())
+  if (connected_nets.empty()) {
     return;
-  if (select_flag)
+  }
+  if (select_flag) {
     addSelected(connected_nets);
-  else
+  } else {
     addHighlighted(connected_nets, highlight_group);
+  }
+}
+
+void MainWindow::selectHighlightConnectedBufferTrees(bool select_flag,
+                                                     int highlight_group)
+{
+  SelectionSet connected_objects;
+  for (auto& sel_obj : selected_) {
+    if (sel_obj.isInst()) {
+      auto inst_obj = std::any_cast<odb::dbInst*>(sel_obj.getObject());
+      for (auto inst_term : inst_obj->getITerms()) {
+        auto inst_term_dir = inst_term->getIoType();
+        if (!inst_term->getSigType().isSupply()
+            && (inst_term_dir == odb::dbIoType::INPUT
+                || inst_term_dir == odb::dbIoType::OUTPUT
+                || inst_term_dir == odb::dbIoType::INOUT)) {
+          auto net_obj = inst_term->getNet();
+          if (net_obj == nullptr
+              || net_obj->getSigType() != odb::dbSigType::SIGNAL) {
+            continue;
+          }
+          connected_objects.insert(
+              Gui::get()->makeSelected(gui::BufferTree(net_obj)));
+        }
+      }
+    }
+  }
+
+  if (connected_objects.empty()) {
+    return;
+  }
+  if (select_flag) {
+    addSelected(connected_objects);
+  } else {
+    addHighlighted(connected_objects, highlight_group);
+  }
 }
 
 void MainWindow::saveSettings()
@@ -1030,11 +1346,14 @@ void MainWindow::saveSettings()
   settings.beginGroup("main");
   settings.setValue("geometry", saveGeometry());
   settings.setValue("state", saveState());
+  settings.setValue("font", QApplication::font());
   settings.setValue("check_exit", hide_option_->isChecked());
   settings.setValue("use_dbu", show_dbu_->isChecked());
+  settings.setValue("ruler_style", default_ruler_style_->isChecked());
   script_->writeSettings(&settings);
   controls_->writeSettings(&settings);
   timing_widget_->writeSettings(&settings);
+  hierarchy_widget_->writeSettings(&settings);
   settings.endGroup();
 }
 
@@ -1045,7 +1364,7 @@ void MainWindow::postReadLef(odb::dbTech* tech, odb::dbLib* library)
 
 void MainWindow::postReadDef(odb::dbBlock* block)
 {
-  emit designLoaded(block);
+  emit blockLoaded(block);
 }
 
 void MainWindow::postReadDb(odb::dbDatabase* db)
@@ -1059,7 +1378,10 @@ void MainWindow::postReadDb(odb::dbDatabase* db)
     return;
   }
 
-  emit designLoaded(block);
+  emit blockLoaded(block);
+  for (auto child : block->getChildren()) {
+    emit blockLoaded(child);
+  }
 }
 
 void MainWindow::setLogger(utl::Logger* logger)
@@ -1067,13 +1389,12 @@ void MainWindow::setLogger(utl::Logger* logger)
   logger_ = logger;
   controls_->setLogger(logger);
   script_->setLogger(logger);
-  viewer_->setLogger(logger);
+  viewers_->setLogger(logger);
   drc_viewer_->setLogger(logger);
-
-  // heat maps
-  for (auto* heat_map : getHeatMaps()) {
-    heat_map->setLogger(logger);
-  }
+  clock_viewer_->setLogger(logger);
+#ifdef ENABLE_CHARTS
+  charts_widget_->setLogger(logger);
+#endif
 }
 
 void MainWindow::fit()
@@ -1085,8 +1406,9 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
 {
   if (event->key() == Qt::Key_Escape) {
     // Esc stop building ruler
-    viewer_->cancelRulerBuild();
-  } else if (event->key() == Qt::Key_K && event->modifiers() & Qt::ShiftModifier) {
+    viewers_->cancelRulerBuild();
+  } else if (event->key() == Qt::Key_K
+             && event->modifiers() & Qt::ShiftModifier) {
     // Shift + K, remove all rulers
     clearRulers();
   }
@@ -1106,9 +1428,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
   exit_check.setIcon(QMessageBox::Question);
   exit_check.setWindowTitle(windowTitle());
   exit_check.setText("Are you sure you want to exit?");
-  QPushButton* exit_button = exit_check.addButton("Exit", QMessageBox::AcceptRole);
+  QPushButton* exit_button
+      = exit_check.addButton("Exit", QMessageBox::AcceptRole);
   QPushButton* cancel_button = exit_check.addButton(QMessageBox::Cancel);
-  QPushButton* hide_button = exit_check.addButton("Hide GUI", QMessageBox::ActionRole);
+  QPushButton* hide_button
+      = exit_check.addButton("Hide GUI", QMessageBox::ActionRole);
 
   // Colorize exit and hide buttons
   exit_button->setStyleSheet("background-color: darkred; color: white;");
@@ -1132,12 +1456,13 @@ void MainWindow::closeEvent(QCloseEvent* event)
   }
 }
 
-const std::vector<std::string> MainWindow::getRestoreTclCommands()
+std::vector<std::string> MainWindow::getRestoreTclCommands()
 {
   std::vector<std::string> cmds;
   // Save rulers
   for (const auto& ruler : rulers_) {
-    cmds.push_back(ruler->getTclCommand(db_->getChip()->getBlock()->getDbUnitsPerMicron()));
+    cmds.push_back(ruler->getTclCommand(
+        db_->getChip()->getBlock()->getDbUnitsPerMicron()));
   }
   // Save buttons
   for (const auto& action : view_tool_bar_->actions()) {
@@ -1155,118 +1480,32 @@ const std::vector<std::string> MainWindow::getRestoreTclCommands()
   controls_->restoreTclCommands(cmds);
 
   // save layout view
-  viewer_->restoreTclCommands(cmds);
+  viewers_->restoreTclCommands(cmds);
 
   return cmds;
-}
-
-const std::vector<HeatMapDataSource*> MainWindow::getHeatMaps()
-{
-  return {
-    &routing_congestion_data_,
-    &placement_density_data_,
-    &power_density_data_
-  };
-}
-
-void MainWindow::setHeatMapSetting(const std::string& name, const std::string& option, const Renderer::Setting& value)
-{
-  HeatMapDataSource* source = nullptr;
-
-  for (auto* heat_map : getHeatMaps()) {
-    if (heat_map->getShortName() == name) {
-      source = heat_map;
-      break;
-    }
-  }
-
-  if (source == nullptr) {
-    QStringList options;
-    for (const auto* heat_map : getHeatMaps()) {
-      options.append(QString::fromStdString(heat_map->getShortName()));
-    }
-    logger_->error(utl::GUI, 28, "{} is not a known map. Valid options are: {}", name, options.join(", ").toStdString());
-  }
-
-  const std::string rebuild_map_option = "rebuild";
-  if (option == rebuild_map_option) {
-    source->destroyMap();
-  } else {
-    auto settings = source->getSettings();
-
-    if (settings.count(option) == 0) {
-      QStringList options;
-      options.append(QString::fromStdString(rebuild_map_option));
-      for (const auto& [key, kv] : settings) {
-        options.append(QString::fromStdString(key));
-      }
-      logger_->error(utl::GUI, 29, "{} is not a valid option. Valid options are: {}", option, options.join(", ").toStdString());
-    }
-
-    auto current_value = settings[option];
-    if (std::holds_alternative<bool>(current_value)) {
-      // is bool
-      if (auto* s = std::get_if<bool>(&value)) {
-        settings[option] = *s;
-      } else {
-        logger_->error(utl::GUI, 60, "{} must be a boolean", option);
-      }
-    } else if (std::holds_alternative<int>(current_value)) {
-      // is int
-      if (auto* s = std::get_if<int>(&value)) {
-        settings[option] = *s;
-      } else if (auto* s = std::get_if<double>(&value)) {
-        settings[option] = static_cast<int>(*s);
-      } else {
-        logger_->error(utl::GUI, 61, "{} must be an integer or double", option);
-      }
-    } else if (std::holds_alternative<double>(current_value)) {
-      // is double
-      if (auto* s = std::get_if<int>(&value)) {
-        settings[option] = static_cast<double>(*s);
-      } else if (auto* s = std::get_if<double>(&value)) {
-        settings[option] = *s;
-      } else {
-        logger_->error(utl::GUI, 62, "{} must be an integer or double", option);
-      }
-    } else {
-      // is string
-      if (auto* s = std::get_if<std::string>(&value)) {
-        settings[option] = *s;
-      } else {
-        logger_->error(utl::GUI, 63, "{} must be a string", option);
-      }
-    }
-    source->setSettings(settings);
-  }
-
-  source->getRenderer()->redraw();
 }
 
 std::string MainWindow::convertDBUToString(int value, bool add_units) const
 {
   if (show_dbu_->isChecked()) {
     return std::to_string(value);
-  } else {
-    auto* block = getBlock();
-    if (block == nullptr) {
-      return std::to_string(value);
-    } else {
-      const double dbu_per_micron = block->getDbUnitsPerMicron();
-
-      std::stringstream ss;
-      const int precision = std::ceil(std::log10(dbu_per_micron));
-      const double micron_value = value / dbu_per_micron;
-
-      ss << std::fixed << std::setprecision(precision) << micron_value;
-
-      if (add_units) {
-        ss << " \u03BCm"; // micro meter
-      }
-
-      return ss.str();
-    }
   }
+  auto* block = getBlock();
+  if (block == nullptr) {
+    return std::to_string(value);
+  }
+  const double dbu_per_micron = block->getDbUnitsPerMicron();
+
+  const int precision = std::ceil(std::log10(dbu_per_micron));
+  const double micron_value = value / dbu_per_micron;
+
+  auto str = utl::to_numeric_string(micron_value, precision);
+
+  if (add_units) {
+    str += " \u03BCm";  // micro meter
+  }
+
+  return str;
 }
 
 int MainWindow::convertStringToDBU(const std::string& value, bool* ok) const
@@ -1283,19 +1522,17 @@ int MainWindow::convertStringToDBU(const std::string& value, bool* ok) const
 
   if (show_dbu_->isChecked()) {
     return new_value.toInt(ok);
-  } else {
-    auto* block = getBlock();
-    if (block == nullptr) {
-      return new_value.toInt(ok);
-    } else {
-      const int dbu_per_micron = block->getDbUnitsPerMicron();
-
-      return new_value.toDouble(ok) * dbu_per_micron;
-    }
   }
+  auto* block = getBlock();
+  if (block == nullptr) {
+    return new_value.toInt(ok);
+  }
+  const int dbu_per_micron = block->getDbUnitsPerMicron();
+
+  return new_value.toDouble(ok) * dbu_per_micron;
 }
 
-void MainWindow::timingCone(std::variant<odb::dbITerm*, odb::dbBTerm*> term, bool fanin, bool fanout)
+void MainWindow::timingCone(Gui::odbTerm term, bool fanin, bool fanout)
 {
   auto* renderer = timing_widget_->getConeRenderer();
 
@@ -1306,4 +1543,92 @@ void MainWindow::timingCone(std::variant<odb::dbITerm*, odb::dbBTerm*> term, boo
   }
 }
 
+void MainWindow::timingPathsThrough(const std::set<Gui::odbTerm>& terms)
+{
+  auto* settings = timing_widget_->getSettings();
+  settings->setFromPin({});
+  std::set<const sta::Pin*> pins;
+  for (const auto& term : terms) {
+    pins.insert(settings->convertTerm(term));
+  }
+  settings->setThruPin({std::move(pins)});
+  settings->setToPin({});
+
+  timing_widget_->updatePaths();
+  timing_widget_->show();
+  timing_widget_->raise();
+}
+
+void MainWindow::registerHeatMap(HeatMapDataSource* heatmap)
+{
+  auto* heat_maps = menuBar()->findChild<QMenu*>("HeatMaps");
+  auto* action
+      = heat_maps->addAction(QString::fromStdString(heatmap->getName()));
+  heatmap_actions_[heatmap] = action;
+  connect(action, &QAction::triggered, [heatmap]() { heatmap->showSetup(); });
+}
+
+void MainWindow::unregisterHeatMap(HeatMapDataSource* heatmap)
+{
+  auto* heat_maps = menuBar()->findChild<QMenu*>("HeatMaps");
+  heat_maps->removeAction(heatmap_actions_[heatmap]);
+  heatmap_actions_.erase(heatmap);
+}
+
+void MainWindow::showGlobalConnect()
+{
+  odb::dbBlock* block = getBlock();
+  if (block == nullptr) {
+    return;
+  }
+
+  GlobalConnectDialog dialog(block, this);
+  dialog.exec();
+}
+
+void MainWindow::openDesign()
+{
+  const QString filefilter = "OpenDB (*.odb *.ODB)";
+  const QString file = QFileDialog::getOpenFileName(
+      this, "Open Design", QString(), filefilter);
+
+  if (file.isEmpty()) {
+    return;
+  }
+
+  try {
+    if (file.endsWith(".odb", Qt::CaseInsensitive)) {
+      open_->setEnabled(false);
+      ord::OpenRoad::openRoad()->readDb(file.toStdString().c_str());
+      logger_->warn(utl::GUI,
+                    77,
+                    "Timing data is not stored in {} and must be loaded "
+                    "separately, if needed.",
+                    file.toStdString());
+    } else {
+      logger_->error(utl::GUI, 76, "Unknown filetype: {}", file.toStdString());
+    }
+  } catch (const std::exception&) {
+    // restore option
+    open_->setEnabled(true);
+  }
+}
+
+#ifdef ENABLE_CHARTS
+void MainWindow::reportSlackHistogramPaths(
+    const std::set<const sta::Pin*>& report_pins)
+{
+  if (!timing_widget_->isVisible()) {
+    timing_widget_->show();
+  }
+
+  // In Qt, an enabled tabified widget is visible, so
+  // we need to make it the active tab.
+  if (timing_widget_->visibleRegion().isEmpty()) {
+    timing_widget_->raise();
+  }
+
+  timing_widget_->reportSlackHistogramPaths(report_pins);
+}
+#endif
 }  // namespace gui

@@ -26,14 +26,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_BASE_TYPES_H_
-#define _FR_BASE_TYPES_H_
+#pragma once
 
 #include <boost/geometry/geometries/box.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/serialization/base_object.hpp>
 #include <boost/geometry/geometries/segment.hpp>
 #include <boost/geometry/strategies/strategies.hpp>
+#include <boost/serialization/base_object.hpp>
 #include <cstdint>
 #include <list>
 #include <map>
@@ -42,16 +41,14 @@
 #include <vector>
 
 #include "odb/dbTypes.h"
+#include "odb/geom.h"
 #include "utl/Logger.h"
 
-namespace odb {
-  class Rect;
-}
-namespace boost::serialization{
-  class access;
+namespace boost::serialization {
+class access;
 }
 
-namespace fr {
+namespace drt {
 using Logger = utl::Logger;
 const utl::ToolId DRT = utl::DRT;
 using frLayerNum = int;
@@ -86,10 +83,12 @@ enum frEndStyleEnum
 enum frBlockObjectEnum
 {
   frcNet,
-  frcTerm,
+  frcBTerm,
+  frcMTerm,
   frcInst,
   frcVia,
-  frcPin,
+  frcBPin,
+  frcMPin,
   frcInstTerm,
   frcRect,
   frcPolygon,
@@ -100,6 +99,7 @@ enum frBlockObjectEnum
   frcBlockage,
   frcLayerBlockage,
   frcBlock,
+  frcMaster,
   frcBoundary,
   frcInstBlockage,
   frcAccessPattern,
@@ -137,6 +137,9 @@ enum frBlockObjectEnum
   gccRect,
   gccPolygon
 };
+
+std::ostream& operator<<(std::ostream& os, frBlockObjectEnum type);
+
 enum class frGuideEnum
 {
   frcGuideX,
@@ -188,6 +191,7 @@ enum class frConstraintTypeEnum
   frcLef58SpacingEndOfLineWithinEncloseCutConstraint,
   frcLef58SpacingEndOfLineWithinParallelEdgeConstraint,
   frcLef58SpacingEndOfLineWithinMaxMinLengthConstraint,
+  frcLef58SpacingWrongDirConstraint,
   frcLef58CutClassConstraint,  // not supported
   frcNonSufficientMetalConstraint,
   frcSpacingSamenetConstraint,
@@ -196,8 +200,18 @@ enum class frConstraintTypeEnum
   frcRecheckConstraint,
   frcSpacingTableInfluenceConstraint,
   frcLef58EolExtensionConstraint,
-  frcLef58EolKeepOutConstraint
+  frcLef58EolKeepOutConstraint,
+  frcLef58MinimumCutConstraint,
+  frcMetalWidthViaConstraint,
+  frcLef58AreaConstraint,
+  frcLef58KeepOutZoneConstraint,
+  frcLef58TwoWiresForbiddenSpcConstraint,
+  frcLef58ForbiddenSpcConstraint,
+  frcLef58EnclosureConstraint,
+  frcSpacingRangeConstraint
 };
+
+std::ostream& operator<<(std::ostream& os, frConstraintTypeEnum type);
 
 enum class frCornerTypeEnum
 {
@@ -205,6 +219,8 @@ enum class frCornerTypeEnum
   CONCAVE,
   CONVEX
 };
+
+std::ostream& operator<<(std::ostream& os, frCornerTypeEnum type);
 
 enum class frCornerDirEnum
 {
@@ -222,6 +238,8 @@ enum class frMinimumcutConnectionEnum
   FROMBELOW = 1
 };
 
+std::ostream& operator<<(std::ostream& os, frMinimumcutConnectionEnum conn);
+
 enum class frMinstepTypeEnum
 {
   UNKNOWN = -1,
@@ -230,7 +248,9 @@ enum class frMinstepTypeEnum
   STEP = 2
 };
 
-#define OPPOSITEDIR 7  // used in FlexGC_main.cpp
+std::ostream& operator<<(std::ostream& os, frMinstepTypeEnum type);
+
+constexpr int OPPOSITEDIR = 7;  // used in FlexGC_main.cpp
 enum class frDirEnum
 {
   UNKNOWN = 0,
@@ -241,6 +261,16 @@ enum class frDirEnum
   N = 5,
   U = 6
 };
+
+static constexpr frDirEnum frDirEnumAll[] = {frDirEnum::D,
+                                             frDirEnum::S,
+                                             frDirEnum::W,
+                                             frDirEnum::E,
+                                             frDirEnum::N,
+                                             frDirEnum::U};
+
+static constexpr frDirEnum frDirEnumPlanar[]
+    = {frDirEnum::S, frDirEnum::W, frDirEnum::E, frDirEnum::N};
 
 enum class AccessPointTypeEnum
 {
@@ -260,47 +290,52 @@ enum class frAccessPointEnum
   NearbyGrid = 4  // nearby grid or 1/2 grid
 };
 
+enum class RipUpMode
+{
+  DRC = 0,
+  ALL = 1,
+  NEARDRC = 2,
+  INCR = 3
+};
+
 namespace bg = boost::geometry;
 
-typedef bg::model::d2::point_xy<frCoord, bg::cs::cartesian> point_t;
-typedef bg::model::box<point_t> box_t;
-typedef bg::model::segment<point_t> segment_t;
+using point_t = bg::model::d2::point_xy<frCoord, bg::cs::cartesian>;
+using box_t = bg::model::box<point_t>;
+using segment_t = bg::model::segment<point_t>;
 
 template <typename T>
 using rq_box_value_t = std::pair<odb::Rect, T>;
 
 struct frDebugSettings
 {
-  frDebugSettings()
-      : debugDR(false),
-        debugDumpDR(false),
-        debugMaze(false),
-        debugPA(false),
-        draw(true),
-        allowPause(true),
-        x(-1),
-        y(-1),
-        iter(0),
-        paMarkers(false),
-        paCombining(false)
-  {
-  }
-
   bool is_on() const { return debugDR || debugPA; }
 
-  bool debugDR;
-  bool debugDumpDR;
-  bool debugMaze;
-  bool debugPA;
-  bool draw;
-  bool allowPause;
+  bool debugDR{false};
+  bool debugDumpDR{false};
+  bool debugMaze{false};
+  bool debugPA{false};
+  bool debugTA{false};
+  bool draw{true};
+  bool allowPause{true};
   std::string netName;
   std::string pinName;
-  int x;
-  int y;
-  int iter;
-  bool paMarkers;
-  bool paCombining;
+  odb::Rect box{-1, -1, -1, -1};
+  int iter{0};
+  bool paMarkers{false};
+  bool paEdge{false};
+  bool paCommit{false};
+  std::string dumpDir;
+
+  int mazeEndIter{-1};
+  int drcCost{-1};
+  int markerCost{-1};
+  int fixedShapeCost{-1};
+  float markerDecay{-1};
+  int ripupMode{-1};
+  int followGuide{-1};
+  bool writeNetTracks{false};
+  bool dumpLastWorker{false};
 };
 
 // Avoids the need to split the whole serializer like
@@ -312,6 +347,6 @@ inline bool is_loading(const Archive& ar)
   return std::is_same<typename Archive::is_loading, boost::mpl::true_>::value;
 }
 
-}  // namespace fr
+using utl::format_as;
 
-#endif
+}  // namespace drt

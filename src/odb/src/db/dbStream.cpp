@@ -30,64 +30,92 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-#include "dbStream.h"
+#include "odb/dbStream.h"
 
-#include "db.h"
+#include <iostream>
+#include <sstream>
+
+#include "dbDatabase.h"
+#include "odb/db.h"
 
 namespace odb {
 
+void dbOStream::pushScope(const std::string& name)
+{
+  _scopes.push_back({name, pos()});
+}
+
+void dbOStream::popScope()
+{
+  auto logger = _db->getLogger();
+  if (logger->debugCheck(utl::ODB, "io_size", 1)) {
+    auto size = pos() - _scopes.back().start_pos;
+    if (size >= 1024) {  // hide tiny contributors
+      std::ostringstream scope_name;
+
+      std::transform(_scopes.begin(),
+                     _scopes.end(),
+                     std::ostream_iterator<std::string>(scope_name, "/"),
+                     [](const Scope& scope) { return scope.name; });
+
+      logger->report("{:8.1f} MB in {}", size / 1048576.0, scope_name.str());
+    }
+  }
+
+  _scopes.pop_back();
+}
+
 dbOStream& operator<<(dbOStream& stream, const Rect& r)
 {
-  stream << r._xlo;
-  stream << r._ylo;
-  stream << r._xhi;
-  stream << r._yhi;
+  stream << r.xlo_;
+  stream << r.ylo_;
+  stream << r.xhi_;
+  stream << r.yhi_;
   return stream;
 }
 
 dbIStream& operator>>(dbIStream& stream, Rect& r)
 {
-  stream >> r._xlo;
-  stream >> r._ylo;
-  stream >> r._xhi;
-  stream >> r._yhi;
+  stream >> r.xlo_;
+  stream >> r.ylo_;
+  stream >> r.xhi_;
+  stream >> r.yhi_;
   return stream;
 }
 
 dbOStream& operator<<(dbOStream& stream, const Point& p)
 {
-  stream << p._x;
-  stream << p._y;
+  stream << p.x_;
+  stream << p.y_;
   return stream;
 }
 
 dbIStream& operator>>(dbIStream& stream, Point& p)
 {
-  stream >> p._x;
-  stream >> p._y;
+  stream >> p.x_;
+  stream >> p.y_;
   return stream;
 }
 
 dbOStream& operator<<(dbOStream& stream, const Oct& o)
 {
-  stream << o.center_high;
-  stream << o.center_low;
-  stream << o.A;
+  stream << o.center_high_;
+  stream << o.center_low_;
+  stream << o.A_;
   return stream;
 }
 
 dbIStream& operator>>(dbIStream& stream, Oct& o)
 {
-  stream >> o.center_high;
-  stream >> o.center_low;
-  stream >> o.A;
+  stream >> o.center_high_;
+  stream >> o.center_low_;
+  stream >> o.A_;
   return stream;
 }
 
-dbOStream::dbOStream(_dbDatabase* db, FILE* f)
+dbOStream::dbOStream(_dbDatabase* db, std::ostream& f) : _f(f)
 {
   _db = db;
-  _f = f;
   _lef_dist_factor = 0.001;
   _lef_area_factor = 0.000001;
 
@@ -99,10 +127,9 @@ dbOStream::dbOStream(_dbDatabase* db, FILE* f)
   }
 }
 
-dbIStream::dbIStream(_dbDatabase* db, FILE* f)
+dbIStream::dbIStream(_dbDatabase* db, std::istream& f) : _f(f)
 {
   _db = db;
-  _f = f;
 
   _lef_dist_factor = 0.001;
   _lef_area_factor = 0.000001;
@@ -113,6 +140,83 @@ dbIStream::dbIStream(_dbDatabase* db, FILE* f)
     _lef_dist_factor = 0.0005;
     _lef_area_factor = 0.00000025;
   }
+}
+
+std::ostream& operator<<(std::ostream& os, const Rect& box)
+{
+  os << "( " << box.xMin() << " " << box.yMin() << " ) ( " << box.xMax() << " "
+     << box.yMax() << " )";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Point& pIn)
+{
+  os << "( " << pIn.x() << " " << pIn.y() << " )";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Orientation2D& ori)
+{
+  if (ori == horizontal) {
+    os << "horizontal";
+  } else {
+    os << "vertical";
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Orientation3D& ori)
+{
+  if (ori == horizontal) {
+    os << "horizontal";
+  } else if (ori == vertical) {
+    os << "vertical";
+  } else {
+    os << "proximal";
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Direction1D& dir)
+{
+  if (dir == low) {
+    os << "low";
+  } else {
+    os << "high";
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Direction2D& dir)
+{
+  if (dir == north) {
+    os << "north";
+  } else if (dir == south) {
+    os << "south";
+  } else if (dir == west) {
+    os << "west";
+  } else {
+    os << "east";
+  }
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Direction3D& dir)
+{
+  if (dir == north) {
+    os << "north";
+  } else if (dir == south) {
+    os << "south";
+  } else if (dir == west) {
+    os << "west";
+  } else if (dir == east) {
+    os << "east";
+  } else if (dir == up) {
+    os << "up";
+  } else {
+    os << "down";
+  }
+  return os;
 }
 
 }  // namespace odb

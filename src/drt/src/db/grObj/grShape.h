@@ -26,21 +26,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GR_SHAPE_H_
-#define _GR_SHAPE_H_
+#pragma once
 
 #include "db/grObj/grFig.h"
 #include "db/infra/frSegStyle.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class grPin;
 class frPathSeg;
 class grShape : public grPinFig
 {
  public:
-  // constructors
-  grShape() : grPinFig() {}
   // setters
   virtual void setLayerNum(frLayerNum tmpLayerNum) = 0;
   // getters
@@ -77,24 +74,13 @@ class grShape : public grPinFig
 
   virtual void setIter(frListIter<std::unique_ptr<grShape>>& in) = 0;
   virtual frListIter<std::unique_ptr<grShape>> getIter() const = 0;
-
- protected:
 };
 
 class grPathSeg : public grShape
 {
  public:
   // constructors
-  grPathSeg()
-      : grShape(),
-        begin(),
-        end(),
-        layer(0),
-        child(nullptr),
-        parent(nullptr),
-        owner(nullptr)
-  {
-  }
+  grPathSeg() = default;
   grPathSeg(const grPathSeg& in)
       : begin(in.begin),
         end(in.end),
@@ -106,11 +92,7 @@ class grPathSeg : public grShape
   }
   grPathSeg(const frPathSeg& in);
   // getters
-  void getPoints(Point& beginIn, Point& endIn) const
-  {
-    beginIn = begin;
-    endIn = end;
-  }
+  std::pair<Point, Point> getPoints() const { return {begin, end}; }
 
   // setters
   void setPoints(const Point& beginIn, const Point& endIn)
@@ -198,9 +180,9 @@ class grPathSeg : public grShape
    * getBBox
    */
   // needs to be updated
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
-    boxIn.init(begin.x(), begin.y(), end.x(), end.y());
+    return Rect(begin.x(), begin.y(), end.x(), end.y());
   }
 
   void setIter(frListIter<std::unique_ptr<grShape>>& in) override { iter = in; }
@@ -209,12 +191,10 @@ class grPathSeg : public grShape
  protected:
   Point begin;
   Point end;
-  frLayerNum layer;
-  frBlockObject* child;
-  frBlockObject* parent;
-  frBlockObject* owner;
+  frLayerNum layer{0};
+  frBlockObject* child{nullptr};
+  frBlockObject* parent{nullptr};
+  frBlockObject* owner{nullptr};
   frListIter<std::unique_ptr<grShape>> iter;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

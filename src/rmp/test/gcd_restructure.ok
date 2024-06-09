@@ -1,19 +1,12 @@
-[INFO ODB-0222] Reading LEF file: Nangate45/Nangate45.lef
-[INFO ODB-0223]     Created 22 technology layers
-[INFO ODB-0224]     Created 27 technology vias
-[INFO ODB-0225]     Created 134 library cells
-[INFO ODB-0226] Finished LEF file:  Nangate45/Nangate45.lef
-[INFO ODB-0127] Reading DEF file: gcd_placed.def
+[INFO ODB-0227] LEF file: Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
 [INFO ODB-0128] Design: gcd
 [INFO ODB-0130]     Created 54 pins.
 [INFO ODB-0131]     Created 571 components and 2554 component-terminals.
 [INFO ODB-0132]     Created 5 special nets and 1142 connections.
 [INFO ODB-0133]     Created 528 nets and 1412 connections.
-[INFO ODB-0134] Finished DEF file: gcd_placed.def
-[WARNING STA-0354] set_input_delay relative to a clock defined on the same port/pin not allowed.
+[WARNING STA-0441] set_input_delay relative to a clock defined on the same port/pin not allowed.
 worst slack 1.29
 Design area 670 u^2 10% utilization.
-[INFO ORD-0030] Using 3 thread(s).
 Removed 0 instances with constant outputs.
 Number of paths for restructure are 69
 Found 69 end points for restructure
@@ -34,4 +27,3 @@ Optimized to 257 instances in iteration 2 with max path depth decrease of 0, del
 [INFO RMP-0006] Found 89 inputs, 52 outputs, 0 clocks, 250 combinational gates, 0 registers after parsing the blif file.
 [INFO RMP-0007] Inserting 250 new instances.
 Design area 429 u^2 7% utilization.
-sdc file size is 5786

@@ -26,37 +26,25 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_MARKER_H_
-#define _FR_MARKER_H_
+#pragma once
 
 #include <set>
 #include <tuple>
 
 #include "db/obj/frFig.h"
 
-namespace fr {
+namespace drt {
 class frConstraint;
 class frMarker : public frFig
 {
  public:
   // constructors
-  frMarker()
-      : frFig(),
-        constraint_(nullptr),
-        bbox_(),
-        layerNum_(0),
-        srcs_(),
-        iter_(),
-        vioHasDir_(false),
-        vioIsH_(false)
-  {
-  }
+  frMarker() = default;
   frMarker(const frMarker& in)
       : constraint_(in.constraint_),
         bbox_(in.bbox_),
         layerNum_(in.layerNum_),
         srcs_(in.srcs_),
-        iter_(),
         vioHasDir_(in.vioHasDir_),
         vioIsH_(in.vioIsH_)
   {
@@ -76,12 +64,12 @@ class frMarker : public frFig
   void addAggressor(frBlockObject* obj,
                     const std::tuple<frLayerNum, Rect, bool>& tupleIn)
   {
-    aggressors_.push_back(std::make_pair(obj, tupleIn));
+    aggressors_.emplace_back(obj, tupleIn);
   }
   void addVictim(frBlockObject* obj,
                  const std::tuple<frLayerNum, Rect, bool>& tupleIn)
   {
-    victims_.push_back(std::make_pair(obj, tupleIn));
+    victims_.emplace_back(obj, tupleIn);
   }
   // getters
 
@@ -91,23 +79,20 @@ class frMarker : public frFig
    * intersects in .cpp
    */
 
-  void getBBox(Rect& bboxIn) const override { bboxIn = bbox_; }
-  const Rect& getBBox() const { return bbox_; }
+  Rect getBBox() const override { return bbox_; }
   frLayerNum getLayerNum() const { return layerNum_; }
 
   const std::set<frBlockObject*>& getSrcs() const { return srcs_; }
 
   void setSrcs(const std::set<frBlockObject*>& srcs) { srcs_ = srcs; }
 
-  std::vector<
-      std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>&
+  std::vector<std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>&
   getAggressors()
   {
     return aggressors_;
   }
 
-  std::vector<
-      std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>&
+  std::vector<std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>&
   getVictims()
   {
     return victims_;
@@ -128,37 +113,26 @@ class frMarker : public frFig
 
   void setIter(frListIter<std::unique_ptr<frMarker>>& in) { iter_ = in; }
   frListIter<std::unique_ptr<frMarker>> getIter() const { return iter_; }
+  void setIndexInOwner(const int& idx) { index_in_owner_ = idx; }
+  int getIndexInOwner() const { return index_in_owner_; }
 
  private:
-  frConstraint* constraint_;
+  frConstraint* constraint_{nullptr};
   Rect bbox_;
-  frLayerNum layerNum_;
+  frLayerNum layerNum_{0};
   std::set<frBlockObject*> srcs_;
   std::vector<std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>
       victims_;  // obj, isFixed
   std::vector<std::pair<frBlockObject*, std::tuple<frLayerNum, Rect, bool>>>
       aggressors_;  // obj, isFixed
   frListIter<std::unique_ptr<frMarker>> iter_;
-  bool vioHasDir_;
-  bool vioIsH_;
+  bool vioHasDir_{false};
+  bool vioIsH_{false};
+  int index_in_owner_{0};
 
   template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frFig>(*this);
-    (ar) & constraint_;
-    (ar) & bbox_;
-    (ar) & layerNum_;
-    (ar) & srcs_;
-    (ar) & victims_;
-    (ar) & aggressors_;
-    // iter is handled by the owner
-    (ar) & vioHasDir_;
-    (ar) & vioIsH_;
-  }
+  void serialize(Archive& ar, unsigned int version);
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

@@ -31,98 +31,95 @@
 
 #pragma once
 
-#include <tcl.h>
-
 #include <map>
+#include <queue>
+#include <unordered_set>
 
 #include "odb/db.h"
 #include "odb/dbWireGraph.h"
 #include "utl/Logger.h"
 
-namespace ant {
+namespace grt {
+class GlobalRouter;
+}
 
-using odb::dbInst;
-using odb::dbITerm;
-using odb::dbNet;
-using odb::dbSWire;
-using odb::dbTechLayer;
-using odb::dbWire;
-using odb::dbWireGraph;
+namespace ant {
 
 using utl::Logger;
 
-typedef std::pair<dbWireGraph::Node*, std::vector<dbWireGraph::Node*>>
-    wireroots_info_vec;
+struct PARinfo;
+struct ARinfo;
+struct AntennaModel;
 
-struct PARinfo
+///////////////////////////////////////
+struct GraphNode;
+
+struct NodeInfo
 {
-  // std::pair<odb::dbWireGraph::Node*, std::vector<odb::dbWireGraph::Node*>>
-  // WirerootNode;
-  odb::dbWireGraph::Node* WirerootNode;
-  std::set<odb::dbITerm*> iterms;
-  double wire_area;
-  double side_wire_area;
-  double iterm_areas[2];
-  double PAR_value;
-  double PSR_value;
-  double diff_PAR_value;
-  double diff_PSR_value;
-};
+  double PAR;
+  double PSR;
+  double diff_PAR;
+  double diff_PSR;
+  double area;
+  double side_area;
+  double iterm_gate_area;
+  double iterm_diff_area;
 
-struct ARinfo
-{
-  odb::dbWireGraph::Node* WirerootNode;
-  odb::dbWireGraph::Node* GateNode;
-  bool violated_net;
-  double PAR_value;
-  double PSR_value;
-  double diff_PAR_value;
-  double diff_PSR_value;
-  double CAR_value;
-  double CSR_value;
-  double diff_CAR_value;
-  double diff_CSR_value;
-  double diff_area;
-};
+  double CAR;
+  double CSR;
+  double diff_CAR;
+  double diff_CSR;
 
-struct ANTENNAmodel
-{
-  odb::dbTechLayer* layer;
+  std::vector<odb::dbITerm*> iterms;
 
-  double metal_factor;
-  double diff_metal_factor;
-
-  double cut_factor;
-  double diff_cut_factor;
-
-  double side_metal_factor;
-  double diff_side_metal_factor;
-
-  double minus_diff_factor;
-  double plus_diff_factor;
-  double diff_metal_reduce_factor;
-
-  ANTENNAmodel& operator=(const ANTENNAmodel& am)
+  NodeInfo& operator+=(const NodeInfo& a)
   {
-    metal_factor = am.metal_factor;
-    diff_metal_factor = am.diff_metal_factor;
-    cut_factor = am.cut_factor;
-    diff_cut_factor = am.diff_cut_factor;
-    side_metal_factor = am.side_metal_factor;
-    diff_side_metal_factor = am.diff_side_metal_factor;
-    minus_diff_factor = am.minus_diff_factor;
-    plus_diff_factor = am.plus_diff_factor;
-    diff_metal_reduce_factor = am.diff_metal_reduce_factor;
-
+    PAR += a.PAR;
+    PSR += a.PSR;
+    diff_PAR += a.diff_PAR;
+    diff_PSR += a.diff_PSR;
+    area += a.area;
+    side_area += a.side_area;
     return *this;
+  }
+  NodeInfo()
+  {
+    PAR = 0.0;
+    PSR = 0.0;
+    diff_PAR = 0.0;
+    diff_PSR = 0.0;
+
+    area = 0.0;
+    side_area = 0.0;
+    iterm_gate_area = 0.0;
+    iterm_diff_area = 0.0;
+
+    CAR = 0.0;
+    CSR = 0.0;
+    diff_CAR = 0.0;
+    diff_CSR = 0.0;
   }
 };
 
-struct VINFO
+using LayerInfoMap = std::map<odb::dbTechLayer*, NodeInfo>;
+using GraphNodeVector = std::vector<GraphNode*>;
+///////////////////////////////////////
+
+class GlobalRouteSource
+{
+ public:
+  virtual ~GlobalRouteSource() = default;
+
+  virtual bool haveRoutes() = 0;
+  virtual void makeNetWires() = 0;
+  virtual void destroyNetWires() = 0;
+};
+
+struct Violation
 {
   int routing_level;
-  std::vector<odb::dbITerm*> iterms;
-  int antenna_cell_nums;
+  std::vector<odb::dbITerm*> gates;
+  int diode_count_per_gate;
 };
 
 class AntennaChecker
@@ -132,100 +129,96 @@ class AntennaChecker
   ~AntennaChecker();
 
   void init(odb::dbDatabase* db,
-            utl::Logger *logger);
-  dbNet* get_net(std::string net_name);
+            GlobalRouteSource* global_route_source,
+            utl::Logger* logger);
 
-  template <class valueType>
-  double defdist(valueType value);
-
-  // wireroots_info_vec find_segment_root(std::pair<dbWireGraph::Node*,
-  // std::vector<dbWireGraph::Node*>> node_info, int wire_level );
-  dbWireGraph::Node* find_segment_root(dbWireGraph::Node* node_info,
-                                       int wire_level);
-  dbWireGraph::Node* find_segment_start(dbWireGraph::Node* node);
-  bool if_segment_root(dbWireGraph::Node* node, int wire_level);
-
-  void find_wire_below_iterms(dbWireGraph::Node* node,
-                              double iterm_areas[2],
-                              int wire_level,
-                              std::set<dbITerm*>& iv,
-                              std::set<dbWireGraph::Node*>& nv);
-  std::pair<double, double> calculate_wire_area(
-      dbWireGraph::Node* node,
-      int wire_level,
-      std::set<dbWireGraph::Node*>& nv,
-      std::set<dbWireGraph::Node*>& level_nodes);
-
-  double get_via_area(dbWireGraph::Edge* edge);
-  dbTechLayer* get_via_layer(dbWireGraph::Edge* edge);
-  std::string get_via_name(dbWireGraph::Edge* edge);
-  double calculate_via_area(dbWireGraph::Node* node, int wire_level);
-  dbWireGraph::Edge* find_via(dbWireGraph::Node* node, int wire_level);
-
-  void find_car_path(dbWireGraph::Node* node,
-                     int wire_level,
-                     dbWireGraph::Node* goal,
-                     std::vector<dbWireGraph::Node*>& current_path,
-                     std::vector<dbWireGraph::Node*>& path_found);
-
-  void print_graph_info(dbWireGraph graph);
-  void calculate_PAR_info(PARinfo& PARtable);
-  bool check_iterm(dbWireGraph::Node* node, double iterm_areas[2]);
-  double get_pwl_factor(odb::dbTechLayerAntennaRule::pwl_pair pwl_info,
-                        double ref_val,
-                        double def);
-
-  void build_wire_PAR_table(std::vector<PARinfo>& PARtable,
-                            std::vector<dbWireGraph::Node*> wireroots_info);
-  void build_wire_CAR_table(std::vector<ARinfo>& CARtable,
-                            std::vector<PARinfo> PARtable,
-                            std::vector<PARinfo> VIA_PARtable,
-                            std::vector<dbWireGraph::Node*> gate_iterms);
-  void build_VIA_PAR_table(std::vector<PARinfo>& VIA_PARtable,
-                           std::vector<dbWireGraph::Node*> wireroots_info);
-  void build_VIA_CAR_table(std::vector<ARinfo>& VIA_CARtable,
-                           std::vector<PARinfo> PARtable,
-                           std::vector<PARinfo> VIA_PARtable,
-                           std::vector<dbWireGraph::Node*> gate_iterms);
-
-  // std::vector<wireroots_info_vec> get_wireroots(dbWireGraph graph);
-  std::vector<dbWireGraph::Node*> get_wireroots(dbWireGraph graph);
-
-  std::pair<bool, bool> check_wire_PAR(ARinfo AntennaRatio, bool simple_report, bool print);
-  std::pair<bool, bool> check_wire_CAR(ARinfo AntennaRatio, bool par_checked, bool simple_report, bool print);
-  bool check_VIA_PAR(ARinfo AntennaRatio, bool simple_report, bool print);
-  bool check_VIA_CAR(ARinfo AntennaRatio, bool simple_report, bool print);
-
-  std::vector<int> GetAntennaRatio(std::string path, bool simple_report);
-
-  void load_antenna_rules();
-  void check_antenna_cell();
-  int check_antennas(std::string report_filename, bool simple_report);
-
-  bool check_violation(PARinfo par_info, dbTechLayer* layer);
-
-  void find_wireroot_iterms(dbWireGraph::Node* node,
-                            int wire_level,
-                            std::vector<dbITerm*>& gates);
-  std::vector<std::pair<double, std::vector<dbITerm*>>> PAR_max_wire_length(
-      dbNet* net,
-      int layer);
-  void check_max_length(const char *net_name,
-                        int layer);
-  std::vector<VINFO> get_net_antenna_violations(dbNet* net,
-                                                std::string antenna_cell_name
-                                                = "",
-                                                std::string cell_pin = "");
-  std::vector<std::pair<double, std::vector<dbITerm*>>>
-  get_violated_wire_length(dbNet* net, int routing_level);
-
-  void find_max_wire_length();
+  // net nullptr -> check all nets
+  int checkAntennas(odb::dbNet* net = nullptr, bool verbose = false);
+  int antennaViolationCount() const;
+  std::vector<Violation> getAntennaViolations(odb::dbNet* net,
+                                              odb::dbMTerm* diode_mterm,
+                                              float ratio_margin);
+  void initAntennaRules();
+  void setReportFileName(const char* file_name);
 
  private:
-  odb::dbDatabase* db_;
-  utl::Logger *logger_;
-  FILE* _out;
-  std::map<odb::dbTechLayer*, ANTENNAmodel> layer_info;
+  bool haveRoutedNets();
+  double getPwlFactor(odb::dbTechLayerAntennaRule::pwl_pair pwl_info,
+                      double ref_val,
+                      double def);
+  double diffArea(odb::dbMTerm* mterm);
+  double gateArea(odb::dbMTerm* mterm);
+  std::vector<std::pair<double, std::vector<odb::dbITerm*>>> parMaxWireLength(
+      odb::dbNet* net,
+      int layer);
+  std::vector<std::pair<double, std::vector<odb::dbITerm*>>>
+  getViolatedWireLength(odb::dbNet* net, int routing_level);
+  bool isValidGate(odb::dbMTerm* mterm);
+  void buildLayerMaps(odb::dbNet* net);
+  void checkNet(odb::dbNet* net,
+                bool verbose,
+                bool report_if_no_violation,
+                std::ofstream& report_file,
+                odb::dbMTerm* diode_mterm,
+                float ratio_margin,
+                int& net_violation_count,
+                int& pin_violation_count);
+  void saveGates(odb::dbNet* db_net);
+  void calculateAreas();
+  void calculatePAR();
+  void calculateCAR();
+  int checkGates(odb::dbNet* db_net,
+                 bool verbose,
+                 bool report_if_no_violation,
+                 std::ofstream& report_file,
+                 odb::dbMTerm* diode_mterm,
+                 float ratio_margin);
+  void calculateViaPar(odb::dbTechLayer* tech_layer, NodeInfo& info);
+  void calculateWirePar(odb::dbTechLayer* tech_layer, NodeInfo& info);
+  std::pair<bool, bool> checkPAR(odb::dbTechLayer* tech_layer,
+                                 const NodeInfo& info,
+                                 bool verbose,
+                                 bool report,
+                                 std::ofstream& report_file);
+  std::pair<bool, bool> checkPSR(odb::dbTechLayer* tech_layer,
+                                 const NodeInfo& info,
+                                 bool verbose,
+                                 bool report,
+                                 std::ofstream& report_file);
+  bool checkCAR(odb::dbTechLayer* tech_layer,
+                const NodeInfo& info,
+                bool verbose,
+                bool report,
+                std::ofstream& report_file);
+  bool checkCSR(odb::dbTechLayer* tech_layer,
+                const NodeInfo& info,
+                bool verbose,
+                bool report,
+                std::ofstream& report_file);
+  // DSU functions
+  void initDsu();
+  int findSet(int u);
+  void unionSet(int u, int v);
+  bool dsuSame(int u, int v);
+
+  odb::dbDatabase* db_{nullptr};
+  odb::dbBlock* block_{nullptr};
+  int dbu_per_micron_{0};
+  GlobalRouteSource* global_route_source_{nullptr};
+  utl::Logger* logger_{nullptr};
+  std::map<odb::dbTechLayer*, AntennaModel> layer_info_;
+  int net_violation_count_{0};
+  float ratio_margin_{0};
+  std::string report_file_name_;
+  std::unordered_map<odb::dbTechLayer*, GraphNodeVector> node_by_layer_map_;
+  std::map<std::string, LayerInfoMap> gate_info_;
+  std::vector<Violation> antenna_violations_;
+  int node_count_;
+  odb::dbTechLayer* min_layer_;
+  // dsu variables
+  std::vector<int> dsu_parent_, dsu_size_;
+  // consts
+  static constexpr int max_diode_count_per_gate = 10;
 };
 
 }  // namespace ant

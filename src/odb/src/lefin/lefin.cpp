@@ -30,26 +30,28 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+#include "odb/lefin.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <list>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include "db.h"
-#include "dbTransform.h"
-#include "geom.h"
 #include "lefLayerPropParser.h"
+#include "lefMacroPropParser.h"
 #include "lefiDebug.hpp"
 #include "lefiUtil.hpp"
-#include "lefin.h"
 #include "lefrReader.hpp"
-#include "poly_decomp.h"
+#include "odb/db.h"
+#include "odb/dbTransform.h"
+#include "odb/geom.h"
+#include "odb/poly_decomp.h"
 #include "utl/Logger.h"
-
 namespace odb {
 
 using LefDefParser::lefrSetRelaxMode;
@@ -60,8 +62,9 @@ lefin::lefin(dbDatabase* db,
              utl::Logger* logger,
              bool ignore_non_routing_layers)
     : _db(db),
-      _tech(NULL),
-      _master(NULL),
+      _tech(nullptr),
+      _lib(nullptr),
+      _master(nullptr),
       _logger(logger),
       _create_tech(false),
       _create_lib(false),
@@ -74,20 +77,21 @@ lefin::lefin(dbDatabase* db,
       _via_cnt(0),
       _errors(0),
       _lef_units(0),
-      _lib_name(NULL),
+      _lib_name(nullptr),
       _dist_factor(1000.0),
       _area_factor(1000000.0),
       _dbu_per_micron(1000),
       _override_lef_dbu(false),
+      _master_modified(false),
       _ignore_non_routing_layers(ignore_non_routing_layers)
 {
 }
 
 void lefin::init()
 {
-  _tech = NULL;
-  _lib = NULL;
-  _master = NULL;
+  _tech = nullptr;
+  _lib = nullptr;
+  _master = nullptr;
   _create_tech = false;
   _create_lib = false;
   _left_bus_delimeter = '[';
@@ -110,9 +114,26 @@ lefin::~lefin()
 {
 }
 
+dbSite* lefin::findSite(const char* name)
+{
+  dbSite* site = _lib->findSite(name);
+
+  if (site == nullptr) {
+    // look in the other libs
+    for (dbLib* lib : _db->getLibs()) {
+      site = lib->findSite(name);
+      if (site) {
+        break;
+      }
+    }
+  }
+
+  return site;
+}
+
 void lefin::createLibrary()
 {
-  _lib = dbLib::create(_db, _lib_name, _hier_delimeter);
+  _lib = dbLib::create(_db, _lib_name, _tech, _hier_delimeter);
   _lib->setLefUnits(_lef_units);
   if (_left_bus_delimeter)
     _lib->setBusDelimeters(_left_bus_delimeter, _right_bus_delimeter);
@@ -187,7 +208,7 @@ static void create_path_box(dbObject* obj,
 bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
 {
   int count = geometry->numItems();
-  dbTechLayer* layer = NULL;
+  dbTechLayer* layer = nullptr;
   int dw = 0;
   int designRuleWidth = -1;
 
@@ -198,7 +219,7 @@ bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
       case lefiGeomLayerE: {
         layer = _tech->findLayer(geometry->getLayer(i));
 
-        if (layer == NULL) {
+        if (layer == nullptr) {
           _logger->warn(utl::ODB,
                         176,
                         "error: undefined layer ({}) referenced",
@@ -344,11 +365,11 @@ bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
                   (dbMPin*) object, layer, x1 + dx, y1 + dy, x2 + dx, y2 + dy);
             else
               box = dbBox::create((dbMaster*) object,
-                            layer,
-                            x1 + dx,
-                            y1 + dy,
-                            x2 + dx,
-                            y2 + dy);
+                                  layer,
+                                  x1 + dx,
+                                  y1 + dy,
+                                  x2 + dx,
+                                  y2 + dy);
             box->setDesignRuleWidth(designRuleWidth);
           }
         }
@@ -362,15 +383,18 @@ bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
       case lefiGeomPolygonIterE: {
         lefiGeomPolygonIter* pItr = geometry->getPolygonIter(i);
         lefiGeomPolygon p;
-        double x;
-        double y;
 
         p.numPoints = pItr->numPoints;
         p.x = pItr->x;
         p.y = pItr->y;
 
-        for (y = 0; y < pItr->yStart; y++)
-          for (x = 0; x < pItr->xStart; x++)
+        // An oddity of the LEF parser is that the count is stored
+        // in the start field.
+        int num_x = lround(pItr->xStart);
+        int num_y = lround(pItr->yStart);
+
+        for (int y = 0; y < num_y; y++) {
+          for (int x = 0; x < num_x; x++) {
             createPolygon(object,
                           is_pin,
                           layer,
@@ -378,13 +402,15 @@ bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
                           designRuleWidth,
                           x * pItr->xStep,
                           y * pItr->yStep);
+          }
+        }
         break;
       }
       case lefiGeomViaE: {
         lefiGeomVia* via = geometry->getVia(i);
         dbTechVia* dbvia = _tech->findVia(via->name);
 
-        if (dbvia == NULL) {
+        if (dbvia == nullptr) {
           _logger->warn(
               utl::ODB, 177, "error: undefined via ({}) referenced", via->name);
           return false;
@@ -404,7 +430,7 @@ bool lefin::addGeoms(dbObject* object, bool is_pin, lefiGeometries* geometry)
         lefiGeomViaIter* viaItr = geometry->getViaIter(i);
         dbTechVia* dbvia = _tech->findVia(viaItr->name);
 
-        if (dbvia == NULL) {
+        if (dbvia == nullptr) {
           _logger->warn(utl::ODB,
                         178,
                         "error: undefined via ({}) referenced",
@@ -600,6 +626,14 @@ void lefin::layer(lefiLayer* layer)
     return;
   }
 
+  for (int i = 0; i < layer->numProps(); i++) {
+    if (!strcmp(layer->propName(i), "LEF58_REGION")) {
+      _logger->warn(
+          utl::ODB, 423, "LEF58_REGION layer {} ignored", layer->name());
+      return;
+    }
+  }
+
   dbTechLayerType type(dbTechLayerType::ROUTING);
 
   if (layer->hasType())
@@ -617,21 +651,34 @@ void lefin::layer(lefiLayer* layer)
   }
 
   dbTechLayer* l = dbTechLayer::create(_tech, layer->name(), type);
-  if (l == NULL) {
+  if (l == nullptr) {
     _logger->warn(utl::ODB,
                   182,
                   "Skipping LAYER ({}) ; cannot understand type",
                   layer->name());
     return;
   }
+
+  if (layer->hasPitch())
+    l->setPitch(dbdist(layer->pitch()));
+  else if (layer->hasXYPitch())
+    l->setPitchXY(dbdist(layer->pitchX()), dbdist(layer->pitchY()));
+
   for (int iii = 0; iii < layer->numProps(); iii++) {
     dbStringProperty::create(l, layer->propName(iii), layer->propValue(iii));
     bool valid = true;
     bool supported = true;
     if (type.getValue() == dbTechLayerType::ROUTING) {
-      if (!strcmp(layer->propName(iii), "LEF58_SPACING"))
-        lefTechLayerSpacingEolParser::parse(layer->propValue(iii), l, this);
-      else if (!strcmp(layer->propName(iii), "LEF58_MINSTEP")) {
+      if (!strcmp(layer->propName(iii), "LEF58_SPACING")) {
+        if (std::string(layer->propValue(iii)).find("WRONGDIRECTION")
+            != std::string::npos) {
+          lefTechLayerWrongDirSpacingParser::parse(
+              layer->propValue(iii), l, this);
+        } else {
+          lefTechLayerSpacingEolParser::parse(layer->propValue(iii), l, this);
+        }
+      } else if (!strcmp(layer->propName(iii), "LEF58_MINSTEP")
+                 || !strcmp(layer->propName(iii), "LEF57_MINSTEP")) {
         lefTechLayerMinStepParser minStepParser;
         valid = minStepParser.parse(layer->propValue(iii), l, this);
       } else if (!strcmp(layer->propName(iii), "LEF58_CORNERSPACING"))
@@ -663,10 +710,30 @@ void lefin::layer(lefiLayer* layer)
       } else if (!strcmp(layer->propName(iii), "LEF58_EOLKEEPOUT")) {
         lefTechLayerEolKeepOutRuleParser eolkoutParser(this);
         eolkoutParser.parse(layer->propValue(iii), l);
+      } else if (!strcmp(layer->propName(iii), "LEF58_WIDTHTABLE")) {
+        WidthTableParser parser(l, this);
+        parser.parse(layer->propValue(iii));
+      } else if (!strcmp(layer->propName(iii), "LEF58_MINIMUMCUT")) {
+        MinCutParser parser(l, this);
+        parser.parse(layer->propValue(iii));
+      } else if (!strcmp(layer->propName(iii), "LEF58_PITCH")) {
+        lefTechLayerPitchRuleParser parser(this);
+        parser.parse(layer->propValue(iii), l);
+      } else if (!strcmp(layer->propName(iii), "LEF58_AREA")) {
+        lefTechLayerAreaRuleParser parser(this);
+        parser.parse(layer->propValue(iii), l, _incomplete_props);
+      } else if (!strcmp(layer->propName(iii), "LEF58_FORBIDDENSPACING")) {
+        lefTechLayerForbiddenSpacingRuleParser parser(this);
+        parser.parse(layer->propValue(iii), l);
+      } else if (!strcmp(layer->propName(iii),
+                         "LEF58_TWOWIRESFORBIDDENSPACING")) {
+        lefTechLayerTwoWiresForbiddenSpcRuleParser parser(this);
+        parser.parse(layer->propValue(iii), l);
       } else
         supported = false;
     } else if (type.getValue() == dbTechLayerType::CUT) {
-      if (!strcmp(layer->propName(iii), "LEF58_SPACING")) {
+      if (!strcmp(layer->propName(iii), "LEF58_SPACING")
+          || !strcmp(layer->propName(iii), "LEF57_SPACING")) {
         lefTechLayerCutSpacingParser cutSpacingParser;
         valid = cutSpacingParser.parse(
             layer->propValue(iii), l, this, _incomplete_props);
@@ -680,9 +747,15 @@ void lefin::layer(lefiLayer* layer)
         lefTechLayerCutSpacingTableParser cutSpacingTableParser(l);
         valid = cutSpacingTableParser.parse(
             layer->propValue(iii), this, _incomplete_props);
-      } else if (!strcmp(layer->propName(iii), "LEF58_TYPE"))
+      } else if (!strcmp(layer->propName(iii), "LEF58_ARRAYSPACING")) {
+        ArraySpacingParser parser(l, this);
+        valid = parser.parse(layer->propValue(iii));
+      } else if (!strcmp(layer->propName(iii), "LEF58_TYPE")) {
         valid = lefTechLayerTypeParser::parse(layer->propValue(iii), l, this);
-      else
+      } else if (!strcmp(layer->propName(iii), "LEF58_KEEPOUTZONE")) {
+        KeepOutZoneParser parser(l, this);
+        parser.parse(layer->propValue(iii));
+      } else
         supported = false;
     } else if (type.getValue() == dbTechLayerType::MASTERSLICE) {
       if (!strcmp(layer->propName(iii), "LEF58_TYPE"))
@@ -698,8 +771,22 @@ void lefin::layer(lefiLayer* layer)
                     layer->propName(iii),
                     layer->name(),
                     layer->propValue(iii));
+    if (!supported) {
+      _logger->info(utl::ODB,
+                    388,
+                    "unsupported {} property for layer {} :\"{}\"",
+                    layer->propName(iii),
+                    layer->name(),
+                    layer->propValue(iii));
+    }
   }
-
+  // update wrong way width
+  for (auto rule : l->getTechLayerWidthTableRules()) {
+    if (rule->isWrongDirection()) {
+      l->setWrongWayWidth(*rule->getWidthTable().begin());
+      break;
+    }
+  }
   if (layer->hasWidth())
     l->setWidth(dbdist(layer->width()));
 
@@ -707,11 +794,6 @@ void lefin::layer(lefiLayer* layer)
     l->setMinWidth(dbdist(layer->minwidth()));
   else if (type == dbTechLayerType::ROUTING)
     l->setMinWidth(l->getWidth());
-
-  if (layer->hasPitch())
-    l->setPitch(dbdist(layer->pitch()));
-  else if (layer->hasXYPitch())
-    l->setPitchXY(dbdist(layer->pitchX()), dbdist(layer->pitchY()));
 
   if (layer->hasOffset())
     l->setOffset(dbdist(layer->offset()));
@@ -762,7 +844,7 @@ void lefin::layer(lefiLayer* layer)
         cur_rule->setAdjacentCuts(layer->spacingAdjacentCuts(j),
                                   dbdist(layer->spacingAdjacentWithin(j)),
                                   dbdist(layer->spacing(j)),
-                                  layer->hasSpacingSamenetPGonly(j));
+                                  layer->hasSpacingAdjacentExcept(j));
       } else if (layer->hasSpacingEndOfLine(j)) {
         double w = layer->spacingEolWidth(j);
         double wn = layer->spacingEolWithin(j);
@@ -787,6 +869,25 @@ void lefin::layer(lefiLayer* layer)
         cur_rule->setCutLayer4Spacing(tmply);
       } else
         l->setSpacing(dbdist(layer->spacing(j)));
+    }
+  }
+
+  if (layer->hasArraySpacing()) {
+    const bool is_long = layer->hasLongArray();
+    const int cut_spacing = dbdist(layer->cutSpacing());
+    int width = 0;
+    if (layer->hasViaWidth()) {
+      width = dbdist(layer->viaWidth());
+    }
+    for (j = 0; j < layer->numArrayCuts(); j++) {
+      const int array_spacing = dbdist(layer->arraySpacing(j));
+      const int cuts = layer->arrayCuts(j);
+
+      auto* rule = odb::dbTechLayerArraySpacingRule::create(l);
+      rule->setCutSpacing(cut_spacing);
+      rule->setArrayWidth(width);
+      rule->setLongArray(is_long);
+      rule->setCutsArraySpacing(cuts, array_spacing);
     }
   }
 
@@ -830,7 +931,6 @@ void lefin::layer(lefiLayer* layer)
       for (int i = 0; i < cur_two->numWidth(); i++) {
         int prl = cur_two->hasWidthPRL(i) ? dbdist(cur_two->widthPRL(i))
                                           : defaultPrl;
-        defaultPrl = prl;
         l->addTwoWidthsIndexEntry(dbdist(cur_two->width(i)), prl);
       }
 
@@ -884,23 +984,19 @@ void lefin::layer(lefiLayer* layer)
   int k;
 
   if (layer->numAntennaModel() > 0) {
-    for (j = 0; j < MIN(layer->numAntennaModel(), 2); j++) {
+    for (j = 0; j < std::min(layer->numAntennaModel(), 2); j++) {
       cur_ant_rule = (j == 1) ? l->createOxide2AntennaRule()
                               : l->createDefaultAntennaRule();
       cur_model = layer->antennaModel(j);
       if (cur_model->hasAntennaAreaFactor()) {
-        if (cur_model->hasAntennaAreaFactorDUO())
-          cur_ant_rule->setAreaFactor(-1.0, cur_model->antennaAreaFactor());
-        else
-          cur_ant_rule->setAreaFactor(cur_model->antennaAreaFactor());
+        cur_ant_rule->setAreaFactor(cur_model->antennaAreaFactor(),
+                                    cur_model->hasAntennaAreaFactorDUO());
       }
 
       if (cur_model->hasAntennaSideAreaFactor()) {
-        if (cur_model->hasAntennaSideAreaFactorDUO())
-          cur_ant_rule->setSideAreaFactor(-1.0,
-                                          cur_model->antennaSideAreaFactor());
-        else
-          cur_ant_rule->setSideAreaFactor(cur_model->antennaSideAreaFactor());
+        cur_ant_rule->setSideAreaFactor(
+            cur_model->antennaSideAreaFactor(),
+            cur_model->hasAntennaSideAreaFactorDUO());
       }
 
       if (cur_model->hasAntennaAreaRatio()) {
@@ -1047,6 +1143,35 @@ void lefin::layer(lefiLayer* layer)
   if (layer->hasWireExtension())
     l->setWireExtension(dbdist(layer->wireExtension()));
 
+  for (int i = 0; i < layer->numEnclosure(); ++i) {
+    auto* rule = odb::dbTechLayerCutEnclosureRule::create(l);
+    rule->setFirstOverhang(dbdist(layer->enclosureOverhang1(i)));
+    rule->setSecondOverhang(dbdist(layer->enclosureOverhang2(i)));
+    rule->setType(dbTechLayerCutEnclosureRule::DEFAULT);
+
+    if (layer->hasEnclosureRule(i)) {
+      const char* rule_name = layer->enclosureRule(i);
+      if (strcasecmp(rule_name, "ABOVE") == 0) {
+        rule->setAbove(true);
+      } else if (strcasecmp(rule_name, "BELOW") == 0) {
+        rule->setBelow(true);
+      }
+    }
+
+    if (layer->hasEnclosureWidth(i)) {
+      rule->setMinWidth(dbdist(layer->enclosureMinWidth(i)));
+    }
+
+    if (layer->hasEnclosureExceptExtraCut(i)) {
+      rule->setExceptExtraCut(true);
+      rule->setCutWithin(dbdist(layer->enclosureExceptExtraCut(i)));
+    }
+
+    if (layer->hasEnclosureMinLength(i)) {
+      rule->setMinLength(dbdist(layer->enclosureMinLength(i)));
+    }
+  }
+
   dbSet<dbProperty> props = dbProperty::getProperties(l);
   if (!props.empty() && props.orderReversed())
     props.reverse();
@@ -1056,15 +1181,15 @@ void lefin::layer(lefiLayer* layer)
 
 void lefin::macroBegin(const char* name)
 {
-  _master = NULL;
+  _master = nullptr;
 
   if (_create_lib) {
-    if (_lib == NULL)
+    if (_lib == nullptr)
       createLibrary();
 
     _master = _lib->findMaster(name);
 
-    if (_master == NULL)
+    if (_master == nullptr)
       _master = dbMaster::create(_lib, name);
   }
 
@@ -1073,11 +1198,25 @@ void lefin::macroBegin(const char* name)
 
 void lefin::macro(lefiMacro* macro)
 {
-  if (_master == NULL)
+  if (_master == nullptr)
     return;
 
   for (int i = 0; i < macro->numProperties(); i++) {
-    dbStringProperty::create(_master, macro->propName(i), macro->propValue(i));
+    bool valid = true;
+    if (!strcmp(macro->propName(i), "LEF58_CLASS")) {
+      valid = lefMacroClassTypeParser::parse(macro->propValue(i), _master);
+    } else {
+      dbStringProperty::create(
+          _master, macro->propName(i), macro->propValue(i));
+    }
+
+    if (!valid) {
+      _logger->warn(utl::ODB,
+                    2000,
+                    "Cannot parse LEF property '{}' with value '{}'",
+                    macro->propName(i),
+                    macro->propValue(i));
+    }
   }
 
   if (macro->hasClass()) {
@@ -1087,7 +1226,7 @@ void lefin::macro(lefiMacro* macro)
 
   if (macro->hasEEQ()) {
     dbMaster* eeq = _lib->findMaster(macro->EEQ());
-    if (eeq == NULL)
+    if (eeq == nullptr)
       _logger->warn(
           utl::ODB, 184, "cannot find EEQ for macro {}", macro->name());
     else
@@ -1096,7 +1235,7 @@ void lefin::macro(lefiMacro* macro)
 
   if (macro->hasLEQ()) {
     dbMaster* leq = _lib->findMaster(macro->LEQ());
-    if (leq == NULL)
+    if (leq == nullptr)
       _logger->warn(
           utl::ODB, 185, "cannot find LEQ for macro {}", macro->name());
     else
@@ -1117,38 +1256,17 @@ void lefin::macro(lefiMacro* macro)
   }
 
   if (macro->hasSiteName()) {
-    dbSite* site = _lib->findSite(macro->siteName());
+    dbSite* site = findSite(macro->siteName());
 
-    if (site == NULL) {
-      // look in the other libs
-      for (dbLib* lib : _db->getLibs()) {
-        site = lib->findSite(macro->siteName());
-        if (site) {
-          // replicating site in the master's lib
-          auto temp = odb::dbSite::create(_lib, site->getName().c_str());
-          temp->setWidth(site->getWidth());
-          temp->setHeight(site->getHeight());
-          if (site->getSymmetryX())
-            temp->setSymmetryX();
-          if (site->getSymmetryY())
-            temp->setSymmetryY();
-          if (site->getSymmetryR90())
-            temp->setSymmetryR90();
-          temp->setClass(site->getClass());
-          site = temp;
-          break;
-        }
-      }
-    }
-
-    if (site == NULL)
+    if (site == nullptr) {
       _logger->warn(utl::ODB,
                     186,
                     "macro {} references unknown site {}",
                     macro->name(),
                     macro->siteName());
-    else
+    } else {
       _master->setSite(site);
+    }
   }
 
   if (macro->hasXSymmetry())
@@ -1165,7 +1283,7 @@ void lefin::macroEnd(const char* /* unused: macroName */)
 {
   if (_master) {
     _master->setFrozen();
-    _master = NULL;
+    _master = nullptr;
     _master_cnt++;
   }
 }
@@ -1191,7 +1309,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
   dbTechNonDefaultRule* dbrule
       = dbTechNonDefaultRule::create(_tech, rule->name());
 
-  if (dbrule == NULL) {
+  if (dbrule == nullptr) {
     _logger->warn(
         utl::ODB, 187, "duplicate NON DEFAULT RULE ({})", rule->name());
     return;
@@ -1202,7 +1320,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
   for (i = 0; i < rule->numLayers(); ++i) {
     dbTechLayer* dblayer = _tech->findLayer(rule->layerName(i));
 
-    if (dblayer == NULL) {
+    if (dblayer == nullptr) {
       _logger->warn(utl::ODB,
                     188,
                     "Invalid layer name {} in NON DEFAULT RULE {}",
@@ -1270,7 +1388,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
     const char* vname = rule->viaName(i);
     dbTechVia* via = _tech->findVia(vname);
 
-    if (via == NULL) {
+    if (via == nullptr) {
       _logger->warn(utl::ODB, 191, "error: undefined VIA {}", vname);
       ++_errors;
       continue;
@@ -1283,7 +1401,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
     const char* rname = rule->viaRuleName(i);
     dbTechViaGenerateRule* genrule = _tech->findViaGenerateRule(rname);
 
-    if (genrule == NULL) {
+    if (genrule == nullptr) {
       _logger->warn(
           utl::ODB, 192, "error: undefined VIA GENERATE RULE {}", rname);
       ++_errors;
@@ -1297,7 +1415,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
     const char* lname = rule->cutLayerName(i);
     dbTechLayer* layer = _tech->findLayer(lname);
 
-    if (layer == NULL) {
+    if (layer == nullptr) {
       _logger->warn(utl::ODB, 193, "error: undefined LAYER {}", lname);
       ++_errors;
       continue;
@@ -1309,7 +1427,7 @@ void lefin::nonDefault(lefiNonDefault* rule)
 
 void lefin::obstruction(lefiObstruction* obs)
 {
-  if ((_master == NULL) || (_skip_obstructions == true))
+  if ((_master == nullptr) || (_skip_obstructions == true))
     return;
 
   lefiGeometries* geometries = obs->geometries();
@@ -1326,7 +1444,7 @@ void lefin::obstruction(lefiObstruction* obs)
 
 void lefin::pin(lefiPin* pin)
 {
-  if (_master == NULL)
+  if (_master == nullptr)
     return;
 
   dbIoType io_type;
@@ -1349,7 +1467,7 @@ void lefin::pin(lefiPin* pin)
 
   dbMTerm* term = _master->findMTerm(pin->name());
 
-  if (term == NULL) {
+  if (term == nullptr) {
     if (_master->isFrozen()) {
       std::string n = _master->getName();
       _logger->warn(
@@ -1373,7 +1491,7 @@ void lefin::pin(lefiPin* pin)
 
   if (pin->lefiPin::hasAntennaPartialMetalArea())
     for (i = 0; i < pin->lefiPin::numAntennaPartialMetalArea(); i++) {
-      tply = NULL;
+      tply = nullptr;
       if (pin->lefiPin::antennaPartialMetalAreaLayer(i)) {
         tply = _tech->findLayer(pin->lefiPin::antennaPartialMetalAreaLayer(i));
         if (!tply)
@@ -1389,7 +1507,7 @@ void lefin::pin(lefiPin* pin)
 
   if (pin->lefiPin::hasAntennaPartialMetalSideArea())
     for (i = 0; i < pin->lefiPin::numAntennaPartialMetalSideArea(); i++) {
-      tply = NULL;
+      tply = nullptr;
       if (pin->lefiPin::antennaPartialMetalSideAreaLayer(i)) {
         tply = _tech->findLayer(
             pin->lefiPin::antennaPartialMetalSideAreaLayer(i));
@@ -1407,7 +1525,7 @@ void lefin::pin(lefiPin* pin)
 
   if (pin->lefiPin::hasAntennaPartialCutArea())
     for (i = 0; i < pin->lefiPin::numAntennaPartialCutArea(); i++) {
-      tply = NULL;
+      tply = nullptr;
       if (pin->lefiPin::antennaPartialCutAreaLayer(i)) {
         tply = _tech->findLayer(pin->lefiPin::antennaPartialCutAreaLayer(i));
         if (!tply)
@@ -1424,7 +1542,7 @@ void lefin::pin(lefiPin* pin)
 
   if (pin->lefiPin::hasAntennaDiffArea())
     for (i = 0; i < pin->lefiPin::numAntennaDiffArea(); i++) {
-      tply = NULL;
+      tply = nullptr;
       if (pin->lefiPin::antennaDiffAreaLayer(i)) {
         tply = _tech->findLayer(pin->lefiPin::antennaDiffAreaLayer(i));
         if (!tply)
@@ -1450,7 +1568,7 @@ void lefin::pin(lefiPin* pin)
 
       if (curlefmodel->hasAntennaGateArea()) {
         for (j = 0; j < curlefmodel->numAntennaGateArea(); j++) {
-          tply = NULL;
+          tply = nullptr;
           if (curlefmodel->antennaGateAreaLayer(j)) {
             tply = _tech->findLayer(curlefmodel->antennaGateAreaLayer(j));
             if (!tply)
@@ -1466,7 +1584,7 @@ void lefin::pin(lefiPin* pin)
 
       if (curlefmodel->hasAntennaMaxAreaCar()) {
         for (j = 0; j < curlefmodel->numAntennaMaxAreaCar(); j++) {
-          tply = NULL;
+          tply = nullptr;
           if (curlefmodel->antennaMaxAreaCarLayer(j)) {
             tply = _tech->findLayer(curlefmodel->antennaMaxAreaCarLayer(j));
             if (!tply)
@@ -1482,7 +1600,7 @@ void lefin::pin(lefiPin* pin)
 
       if (curlefmodel->hasAntennaMaxSideAreaCar()) {
         for (j = 0; j < curlefmodel->numAntennaMaxSideAreaCar(); j++) {
-          tply = NULL;
+          tply = nullptr;
           if (curlefmodel->antennaMaxSideAreaCarLayer(j)) {
             tply = _tech->findLayer(curlefmodel->antennaMaxSideAreaCarLayer(j));
             if (!tply)
@@ -1499,7 +1617,7 @@ void lefin::pin(lefiPin* pin)
 
       if (curlefmodel->hasAntennaMaxCutCar()) {
         for (j = 0; j < curlefmodel->numAntennaMaxCutCar(); j++) {
-          tply = NULL;
+          tply = nullptr;
           if (curlefmodel->antennaMaxCutCarLayer(j)) {
             tply = _tech->findLayer(curlefmodel->antennaMaxCutCarLayer(j));
             if (!tply)
@@ -1542,8 +1660,12 @@ void lefin::propDefBegin(void* /* unused: ptr */)
 {
 }
 
-void lefin::propDef(lefiProp* /* unused: prop */)
+void lefin::propDef(lefiProp* prop)
 {
+  if (std::string(prop->propName()) == "LEF58_METALWIDTHVIAMAP") {
+    auto parser = MetalWidthViaMapParser(_tech, this, _incomplete_props);
+    parser.parse(prop->string());
+  }
 }
 
 void lefin::propDefEnd(void* /* unused: ptr */)
@@ -1555,13 +1677,25 @@ void lefin::site(lefiSite* lefsite)
   if (!_create_lib)
     return;
 
-  if (_lib == NULL)
+  if (_lib == nullptr)
     createLibrary();
 
   dbSite* site = _lib->findSite(lefsite->name());
 
   if (site)
     return;
+
+  for (dbLib* lib : _db->getLibs()) {
+    if ((site = lib->findSite(lefsite->name()))) {
+      _logger->info(utl::ODB,
+                    394,
+                    "Duplicate site {} in {} already seen in {}",
+                    lefsite->name(),
+                    _lib->getName(),
+                    lib->getName());
+      return;
+    }
+  }
 
   site = dbSite::create(_lib, lefsite->name());
 
@@ -1581,6 +1715,24 @@ void lefin::site(lefiSite* lefsite)
 
   if (lefsite->hasClass())
     site->setClass(dbSiteClass(lefsite->siteClass()));
+
+  if (lefsite->hasRowPattern()) {
+    auto row_pattern = lefsite->getRowPatterns();
+    std::vector<dbSite::OrientedSite> converted_row_pattern;
+    converted_row_pattern.reserve(row_pattern.size());
+    for (auto& row : row_pattern) {
+      dbOrientType orient(row.second.c_str());
+      auto child_site = findSite(row.first.c_str());
+      if (!child_site) {
+        ++_errors;
+        _logger->warn(
+            utl::ODB, 208, "Row pattern site {} can't be found", row.first);
+        continue;
+      }
+      converted_row_pattern.push_back({child_site, orient});
+    }
+    site->setRowPattern(converted_row_pattern);
+  }
 }
 
 void lefin::spacingBegin(void* /* unused: ptr */)
@@ -1606,7 +1758,7 @@ void lefin::spacing(lefiSpacing* spacing)
   }
   dbTechSameNetRule* rule = dbTechSameNetRule::create(l1, l2);
 
-  if (rule == NULL)
+  if (rule == nullptr)
     return;
 
   if (spacing->hasStack())
@@ -1704,12 +1856,17 @@ void lefin::version(double num)
 
 void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
 {
-  if (!_create_tech)
+  if (!_create_tech && !via->hasViaRule()) {
     return;
+  }
 
   if (_tech->findVia(via->name())) {
-    _logger->warn(
-        utl::ODB, 208, "VIA: duplicate VIA ({}) ignored...", via->name());
+    debugPrint(_logger,
+               utl::ODB,
+               "lefin",
+               1,
+               "VIA: duplicate VIA ({}) ignored...",
+               via->name());
     return;
   }
 
@@ -1740,7 +1897,7 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
     for (i = 0; i < via->lefiVia::numLayers(); i++) {
       dbTechLayer* l = _tech->findLayer(via->layerName(i));
 
-      if (l == NULL) {
+      if (l == nullptr) {
         _logger->warn(utl::ODB,
                       209,
                       "VIA: undefined layer ({}) in VIA ({})",
@@ -1770,7 +1927,7 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
     dbTechViaGenerateRule* gen_rule
         = _tech->findViaGenerateRule(via->viaRuleName());
 
-    if (gen_rule == NULL) {
+    if (gen_rule == nullptr) {
       _logger->warn(utl::ODB,
                     210,
                     "error: missing VIA GENERATE rule {}",
@@ -1786,7 +1943,7 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
 
     dbTechLayer* bot = _tech->findLayer(via->botMetalLayer());
 
-    if (bot == NULL) {
+    if (bot == nullptr) {
       _logger->warn(
           utl::ODB, 211, "error: missing LAYER {}", via->botMetalLayer());
       ++_errors;
@@ -1795,7 +1952,7 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
 
     dbTechLayer* cut = _tech->findLayer(via->cutLayer());
 
-    if (cut == NULL) {
+    if (cut == nullptr) {
       _logger->warn(utl::ODB, 212, "error: missing LAYER {}", via->cutLayer());
       ++_errors;
       return;
@@ -1803,7 +1960,7 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
 
     dbTechLayer* top = _tech->findLayer(via->topMetalLayer());
 
-    if (top == NULL) {
+    if (top == nullptr) {
       _logger->warn(
           utl::ODB, 213, "error: missing LAYER {}", via->topMetalLayer());
       ++_errors;
@@ -1837,6 +1994,8 @@ void lefin::via(lefiVia* via, dbTechNonDefaultRule* rule)
       P.setYTopEnclosure(dbdist(via->yTopOffset()));
     }
 
+    v->setViaParams(P);
+
     if (via->hasCutPattern())
       v->setPattern(via->cutPattern());
   }
@@ -1855,7 +2014,7 @@ void lefin::viaRule(lefiViaRule* viaRule)
 
   dbTechViaRule* rule = dbTechViaRule::create(_tech, name);
 
-  if (rule == NULL) {
+  if (rule == nullptr) {
     _logger->warn(utl::ODB, 214, "duplicate VIARULE ({}) ignoring...", name);
     return;
   }
@@ -1865,7 +2024,7 @@ void lefin::viaRule(lefiViaRule* viaRule)
     lefiViaRuleLayer* leflay = viaRule->layer(idx);
     dbTechLayer* layer = _tech->findLayer(leflay->name());
 
-    if (layer == NULL) {
+    if (layer == nullptr) {
       _logger->warn(utl::ODB,
                     215,
                     "error: VIARULE ({}) undefined layer {}",
@@ -1895,7 +2054,7 @@ void lefin::viaRule(lefiViaRule* viaRule)
   for (idx = 0; idx < viaRule->numVias(); ++idx) {
     dbTechVia* via = _tech->findVia(viaRule->viaName(idx));
 
-    if (via == NULL) {
+    if (via == nullptr) {
       _logger->warn(utl::ODB,
                     216,
                     "error: undefined VIA {} in VIARULE {}",
@@ -1914,7 +2073,7 @@ void lefin::viaGenerateRule(lefiViaRule* viaRule)
   dbTechViaGenerateRule* rule
       = dbTechViaGenerateRule::create(_tech, name, viaRule->hasDefault());
 
-  if (rule == NULL) {
+  if (rule == nullptr) {
     _logger->warn(utl::ODB, 217, "duplicate VIARULE ({}) ignoring...", name);
     return;
   }
@@ -1924,7 +2083,7 @@ void lefin::viaGenerateRule(lefiViaRule* viaRule)
     lefiViaRuleLayer* leflay = viaRule->layer(idx);
     dbTechLayer* layer = _tech->findLayer(leflay->name());
 
-    if (layer == NULL) {
+    if (layer == nullptr) {
       _logger->warn(utl::ODB,
                     218,
                     "error: VIARULE ({}) undefined layer {}",
@@ -1998,84 +2157,138 @@ void lefin::lineNumber(int lineNo)
 
 bool lefin::readLef(const char* lef_file)
 {
-  _logger->info(utl::ODB, 222, "Reading LEF file: {}", lef_file);
+  try {
+    return readLefInner(lef_file);
+  } catch (...) {
+    _logger->info(utl::ODB, 222, "While reading LEF file: {}", lef_file);
+    throw;
+  }
+}
 
+bool lefin::readLefInner(const char* lef_file)
+{
   bool r = lefin_parse(this, _logger, lef_file);
   for (auto& [obj, name] : _incomplete_props) {
-    if (obj->getObjectType() != odb::dbTechLayerCutSpacingRuleObj
-        && obj->getObjectType() != odb::dbTechLayerCutSpacingTableDefRuleObj)
-      _logger->error(utl::ODB,
-                     246,
-                     "unknown incomplete layer prop of type {}",
-                     obj->getObjName());
     auto layer = _tech->findLayer(name.c_str());
-    if (layer != nullptr) {
-      if (obj->getObjectType() == odb::dbTechLayerCutSpacingRuleObj) {
+    switch (obj->getObjectType()) {
+      case odb::dbTechLayerCutSpacingRuleObj: {
         odb::dbTechLayerCutSpacingRule* cutSpacingRule
             = (odb::dbTechLayerCutSpacingRule*) obj;
-        cutSpacingRule->setSecondLayer(layer);
-      } else if (obj->getObjectType()
-                 == odb::dbTechLayerCutSpacingTableDefRuleObj) {
+        if (layer != nullptr) {
+          cutSpacingRule->setSecondLayer(layer);
+        } else {
+          _logger->warn(utl::ODB,
+                        277,
+                        "dropping LEF58_SPACING rule for cut layer {} for "
+                        "referencing undefined layer {}",
+                        cutSpacingRule->getTechLayer()->getName(),
+                        name);
+          odb::dbTechLayerCutSpacingRule::destroy(cutSpacingRule);
+        }
+        break;
+      }
+      case odb::dbTechLayerCutSpacingTableDefRuleObj: {
         odb::dbTechLayerCutSpacingTableDefRule* cutSpacingTableRule
             = (odb::dbTechLayerCutSpacingTableDefRule*) obj;
-        cutSpacingTableRule->setSecondLayer(layer);
+        if (layer != nullptr) {
+          cutSpacingTableRule->setSecondLayer(layer);
+        } else {
+          _logger->warn(utl::ODB,
+                        280,
+                        "dropping LEF58_SPACINGTABLE rule for cut layer {} for "
+                        "referencing undefined layer {}",
+                        cutSpacingTableRule->getTechLayer()->getName(),
+                        name);
+          odb::dbTechLayerCutSpacingTableDefRule::destroy(cutSpacingTableRule);
+        }
+        break;
       }
-    } else {
-      if (obj->getObjectType() == odb::dbTechLayerCutSpacingRuleObj) {
-        odb::dbTechLayerCutSpacingRule* cutSpacingRule
-            = (odb::dbTechLayerCutSpacingRule*) obj;
-        _logger->warn(utl::ODB,
-                      277,
-                      "dropping LEF58_SPACING rule for cut layer {} for "
-                      "referencing undefined layer {}",
-                      cutSpacingRule->getTechLayer()->getName(),
-                      name);
-        odb::dbTechLayerCutSpacingRule::destroy(cutSpacingRule);
-      } else if (obj->getObjectType()
-                 == odb::dbTechLayerCutSpacingTableDefRuleObj) {
-        odb::dbTechLayerCutSpacingTableDefRule* cutSpacingTableRule
-            = (odb::dbTechLayerCutSpacingTableDefRule*) obj;
-        _logger->warn(utl::ODB,
-                      280,
-                      "dropping LEF58_SPACINGTABLE rule for cut layer {} for "
-                      "referencing undefined layer {}",
-                      cutSpacingTableRule->getTechLayer()->getName(),
-                      name);
-        odb::dbTechLayerCutSpacingTableDefRule::destroy(cutSpacingTableRule);
+      case odb::dbMetalWidthViaMapObj: {
+        odb::dbMetalWidthViaMap* metalWidthViaMap
+            = (odb::dbMetalWidthViaMap*) obj;
+        if (layer != nullptr) {
+          metalWidthViaMap->setCutLayer(layer);
+        } else {
+          _logger->warn(utl::ODB,
+                        356,
+                        "dropping LEF58_METALWIDTHVIAMAP for "
+                        "referencing undefined layer {}",
+                        name);
+          odb::dbMetalWidthViaMap::destroy(metalWidthViaMap);
+        }
+        break;
       }
+      case odb::dbTechLayerAreaRuleObj: {
+        odb::dbTechLayerAreaRule* areaRule = (odb::dbTechLayerAreaRule*) obj;
+        if (layer != nullptr) {
+          areaRule->setTrimLayer(layer);
+        } else {
+          _logger->warn(
+              utl::ODB,
+              361,
+              "dropping LEF58_AREA for referencing undefined layer {}",
+              name);
+          odb::dbTechLayerAreaRule::destroy(areaRule);
+        }
+        break;
+      }
+      default:
+        _logger->error(utl::ODB,
+                       246,
+                       "unknown incomplete layer prop of type {}",
+                       obj->getObjName());
+        break;
     }
   }
   _incomplete_props.clear();
-  if (_layer_cnt)
-    _logger->info(
-        utl::ODB, 223, "    Created {} technology layers", _layer_cnt);
 
-  if (_via_cnt)
-    _logger->info(utl::ODB, 224, "    Created {} technology vias", _via_cnt);
-  if (_master_cnt)
-    _logger->info(utl::ODB, 225, "    Created {} library cells", _master_cnt);
+  std::string p = lef_file;
+  std::vector<std::string> parts;
 
-  _logger->info(utl::ODB, 226, "Finished LEF file:  {}", lef_file);
+  if (_layer_cnt > 0) {
+    std::ostringstream ss;
+    ss << _layer_cnt << " layers";
+    parts.push_back(ss.str());
+  }
 
+  if (_via_cnt > 0) {
+    std::ostringstream ss;
+    ss << _via_cnt << " vias";
+    parts.push_back(ss.str());
+  }
+
+  if (_master_cnt > 0) {
+    std::ostringstream ss;
+    ss << _master_cnt << " library cells";
+    parts.push_back(ss.str());
+  }
+
+  std::string message = "LEF file: " + p;
+  if (!parts.empty()) {
+    message += ", created ";
+    for (size_t i = 0; i < parts.size(); ++i) {
+      message += parts[i];
+      if (i != parts.size() - 1) {
+        message += ", ";
+      }
+    }
+  }
+
+  _logger->info(utl::ODB, 227, message);
   return r;
 }
 
-dbTech* lefin::createTech(const char* lef_file)
+dbTech* lefin::createTech(const char* name, const char* lef_file)
 {
   lefrSetRelaxMode();
   init();
 
-  if (_db->getTech()) {
-    _logger->warn(utl::ODB, 227, "Error: technology already exists");
-    return NULL;
-  };
-
-  _tech = dbTech::create(_db, _dbu_per_micron);
+  _tech = dbTech::create(_db, name, _dbu_per_micron);
   _create_tech = true;
 
   if (!readLef(lef_file)) {
     dbTech::destroy(_tech);
-    return NULL;
+    return nullptr;
   }
 
   if (_errors != 0) {
@@ -2087,21 +2300,21 @@ dbTech* lefin::createTech(const char* lef_file)
   return _tech;
 }
 
-dbLib* lefin::createLib(const char* name, const char* lef_file)
+dbLib* lefin::createLib(dbTech* tech, const char* name, const char* lef_file)
 {
   lefrSetRelaxMode();
   init();
 
-  _tech = _db->getTech();
+  _tech = tech;
 
-  if (_tech == NULL) {
+  if (_tech == nullptr) {
     _logger->warn(utl::ODB, 228, "Error: technology does not exists");
-    return NULL;
+    return nullptr;
   }
 
   if (_db->findLib(name)) {
     _logger->warn(utl::ODB, 229, "Error: library ({}) already exists", name);
-    return NULL;
+    return nullptr;
   };
 
   setDBUPerMicron(_tech->getDbUnitsPerMicron());
@@ -2111,7 +2324,7 @@ dbLib* lefin::createLib(const char* name, const char* lef_file)
   if (!readLef(lef_file)) {
     if (_lib)
       dbLib::destroy(_lib);
-    return NULL;
+    return nullptr;
   }
 
   if (_errors != 0) {
@@ -2124,7 +2337,9 @@ dbLib* lefin::createLib(const char* name, const char* lef_file)
   return _lib;
 }
 
-dbLib* lefin::createTechAndLib(const char* lib_name, const char* lef_file)
+dbLib* lefin::createTechAndLib(const char* tech_name,
+                               const char* lib_name,
+                               const char* lef_file)
 {
   lefrSetRelaxMode();
   init();
@@ -2132,16 +2347,17 @@ dbLib* lefin::createTechAndLib(const char* lib_name, const char* lef_file)
   if (_db->findLib(lib_name)) {
     _logger->warn(
         utl::ODB, 230, "Error: library ({}) already exists", lib_name);
-    return NULL;
+    return nullptr;
   };
 
-  if (_db->getTech()) {
-    _logger->warn(utl::ODB, 231, "Error: technology already exists");
+  if (_db->findTech(tech_name)) {
+    _logger->warn(
+        utl::ODB, 231, "Error: technology {} already exists", tech_name);
     ++_errors;
     return NULL;
   };
 
-  _tech = dbTech::create(_db, _dbu_per_micron);
+  _tech = dbTech::create(_db, tech_name, _dbu_per_micron);
   _lib_name = lib_name;
   _create_lib = true;
   _create_tech = true;
@@ -2150,7 +2366,7 @@ dbLib* lefin::createTechAndLib(const char* lib_name, const char* lef_file)
     if (_lib)
       dbLib::destroy(_lib);
     dbTech::destroy(_tech);
-    return NULL;
+    return nullptr;
   }
 
   if (_errors != 0) {
@@ -2159,75 +2375,6 @@ dbLib* lefin::createTechAndLib(const char* lib_name, const char* lef_file)
     dbTech::destroy(_tech);
     _logger->error(
         utl::ODB, 289, "LEF data from {} is discarded due to errors", lef_file);
-  }
-
-  dbSet<dbTechNonDefaultRule> rules = _tech->getNonDefaultRules();
-
-  if (rules.orderReversed())
-    rules.reverse();
-
-  return _lib;
-}
-
-dbLib* lefin::createTechAndLib(const char* lib_name,
-                               std::list<std::string>& file_list)
-{
-  lefrSetRelaxMode();
-  init();
-
-  if (_db->findLib(lib_name)) {
-    _logger->warn(
-        utl::ODB, 232, "Error: library ({}) already exists", lib_name);
-    return NULL;
-  };
-
-  if (_db->getTech()) {
-    _logger->warn(utl::ODB, 233, "Error: technology already exists");
-    ++_errors;
-    return NULL;
-  };
-
-  _tech = dbTech::create(_db, _dbu_per_micron);
-  assert(_tech);
-
-  _lib_name = lib_name;
-  _create_lib = true;
-  _create_tech = true;
-
-  std::list<std::string>::iterator it;
-  for (it = file_list.begin(); it != file_list.end(); ++it) {
-    std::string str = *it;
-    const char* lef_file = str.c_str();
-    _logger->info(utl::ODB, 234, "Reading LEF file:  {} ...", lef_file);
-    if (!lefin_parse(this, _logger, lef_file)) {
-      _logger->warn(utl::ODB, 235, "Error reading {}", lef_file);
-
-      if (_lib)
-        dbLib::destroy(_lib);
-      dbTech::destroy(_tech);
-      _logger->error(utl::ODB,
-                     291,
-                     "LEF data from {} is discarded due to errors",
-                     lef_file);
-    }
-    _logger->info(utl::ODB, 236, "Finished LEF file:  {}", lef_file);
-  }
-
-  if (_layer_cnt)
-    _logger->info(
-        utl::ODB, 237, "    Created {} technology layers", _layer_cnt);
-
-  if (_via_cnt)
-    _logger->info(utl::ODB, 238, "    Created {} technology vias", _via_cnt);
-
-  if (_master_cnt)
-    _logger->info(utl::ODB, 239, "    Created {} library cells", _master_cnt);
-
-  if (_errors != 0) {
-    if (_lib)
-      dbLib::destroy(_lib);
-    dbTech::destroy(_tech);
-    _logger->error(utl::ODB, 290, "LEF data discarded due to errors");
   }
 
   dbSet<dbTechNonDefaultRule> rules = _tech->getNonDefaultRules();

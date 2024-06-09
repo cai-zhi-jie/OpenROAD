@@ -26,43 +26,20 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_GUIDE_H_
-#define _FR_GUIDE_H_
+#pragma once
 
 #include "db/obj/frFig.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class frGuide : public frConnFig
 {
  public:
-  frGuide()
-      : frConnFig(),
-        begin_(),
-        end_(),
-        beginLayer_(0),
-        endLayer_(0),
-        routeObj_(),
-        net_(nullptr)
-  {
-  }
-  frGuide(const frGuide& in)
-      : frConnFig(),
-        begin_(in.begin_),
-        end_(in.end_),
-        beginLayer_(in.beginLayer_),
-        endLayer_(in.endLayer_),
-        routeObj_(),
-        net_(nullptr)
-  {
-  }
+  frGuide() = default;
+  frGuide(const frGuide& in) = delete;
   // getters
-  void getPoints(Point& beginIn, Point& endIn) const
-  {
-    beginIn = begin_;
-    endIn = end_;
-  }
+  std::pair<Point, Point> getPoints() const { return {begin_, end_}; }
 
   const Point& getBeginPoint() const { return begin_; }
   const Point& getEndPoint() const { return end_; }
@@ -74,6 +51,7 @@ class frGuide : public frConnFig
   {
     return routeObj_;
   }
+  int getIndexInOwner() const { return index_in_owner_; }
   // setters
   void setPoints(const Point& beginIn, const Point& endIn)
   {
@@ -110,32 +88,18 @@ class frGuide : public frConnFig
    * intersects, incomplete
    */
   // needs to be updated
-  void getBBox(Rect& boxIn) const override { boxIn = Rect(begin_, end_); }
+  Rect getBBox() const override { return Rect(begin_, end_); }
   void move(const dbTransform& xform) override { ; }
   bool intersects(const Rect& box) const override { return false; }
+  void setIndexInOwner(const int& val) { index_in_owner_ = val; }
 
  private:
   Point begin_;
   Point end_;
-  frLayerNum beginLayer_;
-  frLayerNum endLayer_;
+  frLayerNum beginLayer_{0};
+  frLayerNum endLayer_{0};
   std::vector<std::unique_ptr<frConnFig>> routeObj_;
-  frNet* net_;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frConnFig>(*this);
-    (ar) & begin_;
-    (ar) & end_;
-    (ar) & beginLayer_;
-    (ar) & endLayer_;
-    (ar) & routeObj_;
-    (ar) & net_;
-  }
-
-  friend class boost::serialization::access;
+  frNet* net_{nullptr};
+  int index_in_owner_{0};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

@@ -26,29 +26,20 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GR_VIA_H_
-#define _GR_VIA_H_
+#pragma once
 
 #include <memory>
 
 #include "db/grObj/grRef.h"
 #include "db/tech/frViaDef.h"
 
-namespace fr {
+namespace drt {
 
 class grVia : public grRef
 {
  public:
   // constructor
-  grVia()
-      : grRef(),
-        origin(),
-        viaDef(nullptr),
-        child(nullptr),
-        parent(nullptr),
-        owner(nullptr)
-  {
-  }
+  grVia() = default;
   grVia(const grVia& in)
       : grRef(in),
         origin(in.origin),
@@ -79,11 +70,10 @@ class grVia : public grRef
 
   dbOrientType getOrient() const override { return dbOrientType(); }
   void setOrient(const dbOrientType& in) override { ; }
-  void getOrigin(Point& in) const override { in = origin; }
+  Point getOrigin() const override { return origin; }
   void setOrigin(const Point& in) override { origin = in; }
 
-  // TODO this looks like a bug, shouldn't it also setOrient?
-  void getTransform(dbTransform& in) const override { in.setOffset(origin); }
+  dbTransform getTransform() const override { return dbTransform(origin); }
   void setTransform(const dbTransform& in) override { ; }
 
   /* from gfrPinFig
@@ -153,22 +143,17 @@ class grVia : public grRef
    * overlaps
    */
 
-  void getBBox(Rect& in) const override
-  {
-    in.init(origin.x(), origin.y(), origin.x(), origin.y());
-  }
+  Rect getBBox() const override { return Rect(origin, origin); }
 
   void setIter(frListIter<std::unique_ptr<grVia>>& in) { iter = in; }
   frListIter<std::unique_ptr<grVia>> getIter() const { return iter; }
 
  protected:
   Point origin;
-  frViaDef* viaDef;
-  frBlockObject* child;
-  frBlockObject* parent;
-  frBlockObject* owner;
+  frViaDef* viaDef{nullptr};
+  frBlockObject* child{nullptr};
+  frBlockObject* parent{nullptr};
+  frBlockObject* owner{nullptr};
   frListIter<std::unique_ptr<grVia>> iter;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

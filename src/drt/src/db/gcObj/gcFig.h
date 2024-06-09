@@ -26,33 +26,16 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GC_FIG_H_
-#define _GC_FIG_H_
+#pragma once
 
 #include <memory>
 
 #include "db/gcObj/gcBlockObject.h"
 #include "db/infra/frBox.h"
 
-namespace fr {
+namespace drt {
 class gcFig : public gcBlockObject
 {
- public:
-  // getters
-  // setters
-  // others
- protected:
-  // constructors
-  gcFig() : gcBlockObject() {}
-  gcFig(const gcFig& in) : gcBlockObject(in) {}
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<gcBlockObject>(*this);
-  }
-
-  friend class boost::serialization::access;
 };
 
 class gcNet;
@@ -72,18 +55,6 @@ class gcConnFig : public gcFig
    * move
    * overlaps
    */
- protected:
-  // constructors
-  gcConnFig() : gcFig() {}
-  gcConnFig(const gcConnFig& in) : gcFig(in) {}
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<gcFig>(*this);
-  }
-
-  friend class boost::serialization::access;
 };
 
 class gcPin;
@@ -110,19 +81,6 @@ class gcPinFig : public gcConnFig
    * move
    * overlaps
    */
- protected:
-  gcPinFig() : gcConnFig() {}
-  gcPinFig(const gcPinFig& in) : gcConnFig(in) {}
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<gcConnFig>(*this);
-  }
-
-  friend class boost::serialization::access;
 };
 
-}  // namespace fr
-
-#endif
+}  // namespace drt

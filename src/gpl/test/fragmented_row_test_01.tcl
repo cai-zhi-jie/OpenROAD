@@ -1,3 +1,4 @@
+source "helpers.tcl"
 set design gcd
 set lib_dir library/nangate45/
 set design_dir design/nangate45/${design}
@@ -11,4 +12,4 @@ read_def ${design_dir}/${design}_fragmented_row.def
 read_liberty ${lib_dir}/NangateOpenCellLibrary_typical.lib
 read_sdc ${design_dir}/${design}.sdc
 
-global_placement -timing_driven -verbose 3 -skip_initial_place
+global_placement -timing_driven -skip_initial_place

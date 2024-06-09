@@ -9,6 +9,7 @@ set_input_delay -clock clk 0.0 {in1 in2}
 set_output_delay -clock clk -0.3 out
 set_propagated_clock clk
 
+source Nangate45/Nangate45.rc
 set_wire_rc -layer metal1
 estimate_parasitics -placement
 
@@ -23,5 +24,5 @@ report_worst_slack -max
 
 # Verilog "ports" are based on net names so make sure port nets
 # are preserved on inputs and outputs.
-report_net -connections -verbose in2
-report_net -connections -verbose out
+report_net in2
+report_net out

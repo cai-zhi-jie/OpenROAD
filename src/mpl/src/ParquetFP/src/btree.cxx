@@ -50,7 +50,6 @@ using std::ofstream;
 using std::string;
 using std::vector;
 
-const int BTree::Undefined = Dimension::Undefined;
 // ========================================================
 BTree::BTree(const HardBlockInfoType& blockinfo)
     : tree(in_tree),
@@ -499,7 +498,7 @@ void BTree::contour_evaluate()  // assume the tree is set
   while (tree_curr != NUM_BLOCKS)  // until reach the root again
   {
     //		cout << "curr: " << tree_curr << " / " <<
-    //in_tree[tree_curr].left
+    // in_tree[tree_curr].left
     //      << " / " << in_tree[tree_curr].right << " // P: " <<
     //      in_tree[tree_curr].parent << endl ;
     if (tree_prev == in_tree[tree_curr].parent) {

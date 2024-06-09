@@ -36,21 +36,43 @@
 #include <QDockWidget>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QMenu>
 #include <QModelIndex>
-#include <QTableView>
-#include <QSpinBox>
 #include <QPushButton>
 #include <QSettings>
-#include <vector>
+#include <QSpinBox>
+#include <QSplitter>
+#include <QTableView>
+#include <memory>
 
+#include "gui/gui.h"
 #include "odb/db.h"
-#include "staGui.h"
+
+namespace sta {
+class Pin;
+class dbSta;
+}  // namespace sta
 
 namespace gui {
+
+class TimingPath;
+class TimingPathRenderer;
+class TimingConeRenderer;
+class TimingControlsDialog;
+class TimingPathDetailModel;
+class TimingPathsModel;
+class GuiDBChangeListener;
+
 class TimingWidget : public QDockWidget
 {
   Q_OBJECT
  public:
+  enum CommandType
+  {
+    CLOSEST_MATCH,
+    FROM_START_TO_END
+  };
+
   TimingWidget(QWidget* parent = nullptr);
   ~TimingWidget();
 
@@ -62,21 +84,29 @@ class TimingWidget : public QDockWidget
   void readSettings(QSettings* settings);
   void writeSettings(QSettings* settings);
 
+  TimingControlsDialog* getSettings() { return settings_; }
+
+  void updatePaths();
+#ifdef ENABLE_CHARTS
+  void reportSlackHistogramPaths(const std::set<const sta::Pin*>& report_pins);
+#endif
+
  signals:
   void highlightTimingPath(TimingPath* timing_path);
+  void inspect(const Selected& selection);
+  void setCommand(const QString& command);
 
  public slots:
   void showPathDetails(const QModelIndex& index);
   void clearPathDetails();
-  void highlightPathStage(TimingPathDetailModel* model, const QModelIndex& index);
-  void findNodeInPathDetails();
+  void highlightPathStage(TimingPathDetailModel* model,
+                          const QModelIndex& index);
 
   void toggleRenderer(bool enable);
 
   void populatePaths();
   void modelWasReset();
 
-  void showPathIndex(int pathId);
   void selectedRowChanged(const QItemSelection& prev_index,
                           const QItemSelection& curr_index);
   void selectedDetailRowChanged(const QItemSelection& prev_index,
@@ -89,6 +119,15 @@ class TimingWidget : public QDockWidget
 
   void updateClockRows();
 
+  void showSettings();
+
+  void writePathReportCommand(const QModelIndex& selected_index,
+                              const CommandType& type);
+  void showCommandsMenu(const QPoint& pos);
+
+ private slots:
+  void hideColumn(int index, bool checked);
+
  protected:
   void keyPressEvent(QKeyEvent* key_event) override;
   void showEvent(QShowEvent* event) override;
@@ -96,17 +135,29 @@ class TimingWidget : public QDockWidget
 
  private:
   void copy();
+  void setColumnDisplayMenu();
+  void addCommandsMenuActions();
+  void populateAndSortModels(const std::set<const sta::Pin*>& from,
+                             const std::vector<std::set<const sta::Pin*>>& thru,
+                             const std::set<const sta::Pin*>& to);
+  void setInitialColumnsVisibility(const QVariant& columns_visibility);
+  QVariantList getColumnsVisibility() const;
+
+  QMenu* commands_menu_;
+
+  QModelIndex timing_paths_table_index_;
 
   QTableView* setup_timing_table_view_;
   QTableView* hold_timing_table_view_;
   QTableView* path_details_table_view_;
   QTableView* capture_details_table_view_;
 
-  QLineEdit* find_object_edit_;
-  QSpinBox* path_index_spin_box_;
-  QSpinBox* path_count_spin_box_;
   QPushButton* update_button_;
-  QCheckBox* expand_clk_;
+  QPushButton* columns_control_container_;
+  QMenu* columns_control_;
+  QPushButton* settings_button_;
+
+  TimingControlsDialog* settings_;
 
   TimingPathsModel* setup_timing_paths_model_;
   TimingPathsModel* hold_timing_paths_model_;
@@ -115,9 +166,13 @@ class TimingWidget : public QDockWidget
   std::unique_ptr<TimingPathRenderer> path_renderer_;
   std::unique_ptr<TimingConeRenderer> cone_renderer_;
   GuiDBChangeListener* dbchange_listener_;
+
+  QSplitter* delay_detail_splitter_;
   QTabWidget* delay_widget_;
   QTabWidget* detail_widget_;
 
   QTableView* focus_view_;
+
+  QVector<bool> initial_columns_visibility_;  // from settings
 };
 }  // namespace gui

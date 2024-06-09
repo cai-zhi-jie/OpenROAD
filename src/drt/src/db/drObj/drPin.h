@@ -26,22 +26,21 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DR_PIN_H
-#define _DR_PIN_H
+#pragma once
 
 #include "db/drObj/drAccessPattern.h"
 #include "db/drObj/drBlockObject.h"
+#include "db/obj/frBTerm.h"
 #include "db/obj/frInstTerm.h"
 #include "db/obj/frTerm.h"
 
-namespace fr {
+namespace drt {
+
 class drNet;
-using namespace std;
+
 class drPin : public drBlockObject
 {
  public:
-  // constructors
-  drPin() : drBlockObject(), term_(nullptr), accessPatterns_(), net_(nullptr) {}
   // setters
   void setFrTerm(frBlockObject* in) { term_ = in; }
   void addAccessPattern(std::unique_ptr<drAccessPattern> in)
@@ -59,49 +58,28 @@ class drPin : public drBlockObject
   }
   drNet* getNet() const { return net_; }
   bool isInstPin() { return hasFrTerm() && term_->typeId() == frcInstTerm; }
-  void getAPBbox(FlexMazeIdx& l, FlexMazeIdx& h)
-  {
-    FlexMazeIdx mi;
-    l.set(std::numeric_limits<frMIdx>::max(),
-          std::numeric_limits<frMIdx>::max(),
-          std::numeric_limits<frMIdx>::max());
-    h.set(std::numeric_limits<frMIdx>::min(),
-          std::numeric_limits<frMIdx>::min(),
-          std::numeric_limits<frMIdx>::min());
-    for (auto& ap : getAccessPatterns()) {
-      ap->getMazeIdx(mi);
-      l.set(min(l.x(), mi.x()), min(l.y(), mi.y()), min(l.z(), mi.z()));
-      h.set(max(h.x(), mi.x()), max(h.y(), mi.y()), max(h.z(), mi.z()));
-    }
-  }
+  std::pair<FlexMazeIdx, FlexMazeIdx> getAPBbox();
   // others
   frBlockObjectEnum typeId() const override { return drcPin; }
   std::string getName()
   {
     if (hasFrTerm()) {
-      if (term_->typeId() == frcInstTerm)
+      if (term_->typeId() == frcInstTerm) {
         return static_cast<frInstTerm*>(term_)->getName();
+      }
       return static_cast<frTerm*>(term_)->getName();
     }
     return "";
   }
 
  private:
-  frBlockObject* term_;  // either frTerm or frInstTerm
+  frBlockObject* term_{nullptr};  // either frTerm or frInstTerm
   std::vector<std::unique_ptr<drAccessPattern>> accessPatterns_;
-  drNet* net_;
+  drNet* net_{nullptr};
 
   template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<drBlockObject>(*this);
-    (ar) & term_;
-    (ar) & accessPatterns_;
-    (ar) & net_;
-  }
-
+  void serialize(Archive& ar, unsigned int version);
   friend class boost::serialization::access;
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

@@ -26,13 +26,12 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_SHAPE_H_
-#define _FR_SHAPE_H_
+#pragma once
 
 #include "db/infra/frSegStyle.h"
 #include "db/obj/frFig.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class frPin;
 class drPathSeg;
@@ -69,16 +68,25 @@ class frShape : public frPinFig
 
   virtual void setIter(frListIter<std::unique_ptr<frShape>>& in) = 0;
   virtual frListIter<std::unique_ptr<frShape>> getIter() const = 0;
+  void setIndexInOwner(int idx) { index_in_owner_ = idx; }
+  int getIndexInOwner() const { return index_in_owner_; }
+
+  bool hasPin() const override
+  {
+    return (owner_)
+           && ((owner_->typeId() == frcBPin) || owner_->typeId() == frcMPin);
+  }
 
  protected:
   // constructors
-  frShape() : frPinFig() {}
+  frShape() = default;
+  frShape(frBlockObject* owner) : owner_(owner) {}
+
+  frBlockObject* owner_{nullptr};  // general back pointer 0
+  int index_in_owner_{0};
 
   template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frPinFig>(*this);
-  }
+  void serialize(Archive& ar, unsigned int version);
 
   friend class boost::serialization::access;
 };
@@ -87,13 +95,10 @@ class frRect : public frShape
 {
  public:
   // constructors
-  frRect() : frShape(), box_(), layer_(0), owner_(nullptr) {}
-  frRect(const frRect& in)
-      : frShape(in), box_(in.box_), layer_(in.layer_), owner_(in.owner_)
-  {
-  }
+  frRect() = default;
+  frRect(const frRect& in) : frShape(in), box_(in.box_), layer_(in.layer_) {}
   frRect(int xl, int yl, int xh, int yh, frLayerNum lNum, frBlockObject* owner)
-      : frShape(), box_(xl, yl, xh, yh), layer_(lNum), owner_(owner)
+      : frShape(owner), box_(xl, yl, xh, yh), layer_(lNum)
   {
   }
 
@@ -103,20 +108,20 @@ class frRect : public frShape
   // others
   bool isHor() const
   {
-    frCoord xSpan = box_.xMax() - box_.xMin();
-    frCoord ySpan = box_.yMax() - box_.yMin();
+    frCoord xSpan = box_.dx();
+    frCoord ySpan = box_.dy();
     return (xSpan >= ySpan) ? true : false;
   }
   frCoord width() const
   {
-    frCoord xSpan = box_.xMax() - box_.xMin();
-    frCoord ySpan = box_.yMax() - box_.yMin();
+    frCoord xSpan = box_.dx();
+    frCoord ySpan = box_.dy();
     return (xSpan > ySpan) ? ySpan : xSpan;
   }
   frCoord length() const
   {
-    frCoord xSpan = box_.xMax() - box_.xMin();
-    frCoord ySpan = box_.yMax() - box_.yMin();
+    frCoord xSpan = box_.dx();
+    frCoord ySpan = box_.dy();
     return (xSpan < ySpan) ? ySpan : xSpan;
   }
   frBlockObjectEnum typeId() const override { return frcRect; }
@@ -129,19 +134,18 @@ class frRect : public frShape
   frLayerNum getLayerNum() const override { return layer_; }
 
   /* from frPinFig
-   * hasPin
    * getPin
    * addToPin
    * removeFromPin
    */
-  bool hasPin() const override
-  {
-    return (owner_) && (owner_->typeId() == frcPin);
-  }
-
   frPin* getPin() const override { return reinterpret_cast<frPin*>(owner_); }
 
   void addToPin(frPin* in) override
+  {
+    owner_ = reinterpret_cast<frBlockObject*>(in);
+  }
+
+  void addToPin(frBPin* in) override
   {
     owner_ = reinterpret_cast<frBlockObject*>(in);
   }
@@ -173,14 +177,11 @@ class frRect : public frShape
    * move, in .cpp
    * intersects in .cpp
    */
-  void getBBox(Rect& boxIn) const override { boxIn = box_; }
-  const Rect& getBBox() const { return box_; }
+  Rect getBBox() const override { return box_; }
   void move(const dbTransform& xform) override { xform.apply(box_); }
   bool intersects(const Rect& box) const override
   {
-    Rect rectBox;
-    getBBox(rectBox);
-    return rectBox.intersects(box);
+    return getBBox().intersects(box);
   }
 
   void setIter(frListIter<std::unique_ptr<frShape>>& in) override
@@ -192,22 +193,14 @@ class frRect : public frShape
     return iter_;
   }
   void shift(int x, int y) { box_.moveDelta(x, y); }
-  void setLeft(frCoord v) {
-      box_.set_xlo(v);
-  }
-  void setRight(frCoord v) {
-      box_.set_xhi(v);
-  }
-  void setTop(frCoord v) {
-      box_.set_yhi(v);
-  }
-  void setBottom(frCoord v) {
-      box_.set_ylo(v);
-  }
+  void setLeft(frCoord v) { box_.set_xlo(v); }
+  void setRight(frCoord v) { box_.set_xhi(v); }
+  void setTop(frCoord v) { box_.set_yhi(v); }
+  void setBottom(frCoord v) { box_.set_ylo(v); }
+
  protected:
   Rect box_;
-  frLayerNum layer_;
-  frBlockObject* owner_;  // general back pointer 0
+  frLayerNum layer_{0};
   frListIter<std::unique_ptr<frShape>> iter_;
 
   template <class Archive>
@@ -216,7 +209,6 @@ class frRect : public frShape
     (ar) & boost::serialization::base_object<frShape>(*this);
     (ar) & box_;
     (ar) & layer_;
-    (ar) & owner_;
     // iter is handled by the owner
   }
 
@@ -227,15 +219,12 @@ class frPatchWire : public frShape
 {
  public:
   // constructors
-  frPatchWire() : frShape(), offsetBox_(), origin_(), layer_(0), owner_(nullptr)
-  {
-  }
+  frPatchWire() = default;
   frPatchWire(const frPatchWire& in)
-      : frShape(),
+      : frShape(in),
         offsetBox_(in.offsetBox_),
         origin_(in.origin_),
-        layer_(in.layer_),
-        owner_(in.owner_)
+        layer_(in.layer_)
   {
   }
   frPatchWire(const drPatchWire& in);
@@ -254,19 +243,18 @@ class frPatchWire : public frShape
   frLayerNum getLayerNum() const override { return layer_; }
 
   /* from frPinFig
-   * hasPin
    * getPin
    * addToPin
    * removeFromPin
    */
-  bool hasPin() const override
-  {
-    return (owner_) && (owner_->typeId() == frcPin);
-  }
-
   frPin* getPin() const override { return reinterpret_cast<frPin*>(owner_); }
 
   void addToPin(frPin* in) override
+  {
+    owner_ = reinterpret_cast<frBlockObject*>(in);
+  }
+
+  void addToPin(frBPin* in) override
   {
     owner_ = reinterpret_cast<frBlockObject*>(in);
   }
@@ -298,21 +286,19 @@ class frPatchWire : public frShape
    * move, in .cpp
    * intersects in .cpp
    */
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
     dbTransform xform(origin_);
-    boxIn = offsetBox_;
-    xform.apply(boxIn);
+    Rect box = offsetBox_;
+    xform.apply(box);
+    return box;
   }
-  void getOffsetBox(Rect& boxIn) const { boxIn = offsetBox_; }
-  void getOrigin(Point& in) const { in = origin_; }
+  Rect getOffsetBox() const { return offsetBox_; }
   Point getOrigin() const { return origin_; }
   void move(const dbTransform& xform) override {}
   bool intersects(const Rect& box) const override
   {
-    Rect rectBox;
-    getBBox(rectBox);
-    return rectBox.intersects(box);
+    return getBBox().intersects(box);
   }
 
   void setIter(frListIter<std::unique_ptr<frShape>>& in) override
@@ -325,11 +311,9 @@ class frPatchWire : public frShape
   }
 
  protected:
-  // Rect          box_;
   Rect offsetBox_;
   Point origin_;
-  frLayerNum layer_;
-  frBlockObject* owner_;  // general back pointer 0
+  frLayerNum layer_{0};
   frListIter<std::unique_ptr<frShape>> iter_;
 
   template <class Archive>
@@ -339,7 +323,6 @@ class frPatchWire : public frShape
     (ar) & offsetBox_;
     (ar) & origin_;
     (ar) & layer_;
-    (ar) & owner_;
     // iter is handled by the owner
   }
 
@@ -350,9 +333,9 @@ class frPolygon : public frShape
 {
  public:
   // constructors
-  frPolygon() : frShape(), points_(), layer_(0), owner_(nullptr) {}
+  frPolygon() = default;
   frPolygon(const frPolygon& in)
-      : frShape(), points_(in.points_), layer_(in.layer_), owner_(in.owner_)
+      : frShape(in), points_(in.points_), layer_(in.layer_)
   {
   }
   // setters
@@ -370,19 +353,18 @@ class frPolygon : public frShape
   frLayerNum getLayerNum() const override { return layer_; }
 
   /* from frPinFig
-   * hasPin
    * getPin
    * addToPin
    * removeFromPin
    */
-  bool hasPin() const override
-  {
-    return (owner_) && (owner_->typeId() == frcPin);
-  }
-
   frPin* getPin() const override { return reinterpret_cast<frPin*>(owner_); }
 
   void addToPin(frPin* in) override
+  {
+    owner_ = reinterpret_cast<frBlockObject*>(in);
+  }
+
+  void addToPin(frBPin* in) override
   {
     owner_ = reinterpret_cast<frBlockObject*>(in);
   }
@@ -414,13 +396,13 @@ class frPolygon : public frShape
    * move, in .cpp
    * intersects, in .cpp
    */
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
     frCoord llx = 0;
     frCoord lly = 0;
     frCoord urx = 0;
     frCoord ury = 0;
-    if (points_.size()) {
+    if (!points_.empty()) {
       llx = points_.begin()->x();
       urx = points_.begin()->x();
       lly = points_.begin()->y();
@@ -432,7 +414,7 @@ class frPolygon : public frShape
       urx = (urx > point.x()) ? urx : point.x();
       ury = (ury > point.y()) ? ury : point.y();
     }
-    boxIn.init(llx, lly, urx, ury);
+    return Rect(llx, lly, urx, ury);
   }
   void move(const dbTransform& xform) override
   {
@@ -453,8 +435,7 @@ class frPolygon : public frShape
 
  protected:
   std::vector<Point> points_;
-  frLayerNum layer_;
-  frBlockObject* owner_;
+  frLayerNum layer_{0};
   frListIter<std::unique_ptr<frShape>> iter_;
 
   template <class Archive>
@@ -463,7 +444,6 @@ class frPolygon : public frShape
     (ar) & boost::serialization::base_object<frShape>(*this);
     (ar) & points_;
     (ar) & layer_;
-    (ar) & owner_;
     // iter is handled by the owner
   }
 
@@ -474,45 +454,23 @@ class frPathSeg : public frShape
 {
  public:
   // constructors
-  frPathSeg()
-      : frShape(),
-        begin_(),
-        end_(),
-        layer_(0),
-        style_(),
-        owner_(nullptr),
-        tapered_(false)
-  {
-  }
+  frPathSeg() = default;
   frPathSeg(const frPathSeg& in)
-      : begin_(in.begin_),
+      : frShape(in),
+        begin_(in.begin_),
         end_(in.end_),
         layer_(in.layer_),
         style_(in.style_),
-        owner_(in.owner_),
         tapered_(in.tapered_)
   {
   }
   frPathSeg(const drPathSeg& in);
   frPathSeg(const taPathSeg& in);
   // getters
-  void getPoints(Point& beginIn, Point& endIn) const
-  {
-    beginIn = begin_;
-    endIn = end_;
-  }
-  std::pair<Point, Point> getPoints() const
-  {
-    return {begin_, end_};
-  }
+  std::pair<Point, Point> getPoints() const { return {begin_, end_}; }
   const Point& getBeginPoint() const { return begin_; }
   const Point& getEndPoint() const { return end_; }
-  void getStyle(frSegStyle& styleIn) const
-  {
-    styleIn.setBeginStyle(style_.getBeginStyle(), style_.getBeginExt());
-    styleIn.setEndStyle(style_.getEndStyle(), style_.getEndExt());
-    styleIn.setWidth(style_.getWidth());
-  }
+  const frSegStyle& getStyle() const { return style_; }
   frEndStyle getBeginStyle() const { return style_.getBeginStyle(); }
   frEndStyle getEndStyle() const { return style_.getEndStyle(); }
   frUInt4 getEndExt() const { return style_.getEndExt(); }
@@ -520,11 +478,40 @@ class frPathSeg : public frShape
   bool isVertical() const { return begin_.x() == end_.x(); }
   frCoord high() const { return isVertical() ? end_.y() : end_.x(); }
   frCoord low() const { return isVertical() ? begin_.y() : begin_.x(); }
+  void setHigh(frCoord v)
+  {
+    if (isVertical()) {
+      end_.setY(v);
+    } else {
+      end_.setX(v);
+    }
+  }
+  void setLow(frCoord v)
+  {
+    if (isVertical()) {
+      begin_.setY(v);
+    } else {
+      begin_.setX(v);
+    }
+  }
+  bool isBeginTruncated()
+  {
+    return style_.getBeginStyle() == frcTruncateEndStyle;
+  }
+  bool isEndTruncated() { return style_.getEndStyle() == frcTruncateEndStyle; }
   // setters
   void setPoints(const Point& beginIn, const Point& endIn)
   {
     begin_ = beginIn;
     end_ = endIn;
+  }
+  void setPoints_safe(const Point& beginIn, const Point& endIn)
+  {
+    if (endIn < beginIn) {
+      setPoints(endIn, beginIn);
+    } else {
+      setPoints(beginIn, endIn);
+    }
   }
   void setStyle(const frSegStyle& styleIn)
   {
@@ -532,11 +519,11 @@ class frPathSeg : public frShape
     style_.setEndStyle(styleIn.getEndStyle(), styleIn.getEndExt());
     style_.setWidth(styleIn.getWidth());
   }
-  void setBeginStyle(frEndStyle bs, frUInt4 ext = 0)
+  void setBeginStyle(const frEndStyle& bs, frUInt4 ext = 0)
   {
     style_.setBeginStyle(bs, ext);
   }
-  void setEndStyle(frEndStyle es, frUInt4 ext = 0)
+  void setEndStyle(const frEndStyle& es, frUInt4 ext = 0)
   {
     style_.setEndStyle(es, ext);
   }
@@ -551,19 +538,18 @@ class frPathSeg : public frShape
   frLayerNum getLayerNum() const override { return layer_; }
 
   /* from frPinFig
-   * hasPin
    * getPin
    * addToPin
    * removeFromPin
    */
-  bool hasPin() const override
-  {
-    return (owner_) && (owner_->typeId() == frcPin);
-  }
-
   frPin* getPin() const override { return reinterpret_cast<frPin*>(owner_); }
 
   void addToPin(frPin* in) override
+  {
+    owner_ = reinterpret_cast<frBlockObject*>(in);
+  }
+
+  void addToPin(frBPin* in) override
   {
     owner_ = reinterpret_cast<frBlockObject*>(in);
   }
@@ -596,7 +582,7 @@ class frPathSeg : public frShape
    * intersects, in .cpp
    */
   // needs to be updated
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
     bool isHorizontal = true;
     if (begin_.x() == end_.x()) {
@@ -606,16 +592,15 @@ class frPathSeg : public frShape
     auto beginExt = style_.getBeginExt();
     auto endExt = style_.getEndExt();
     if (isHorizontal) {
-      boxIn.init(begin_.x() - beginExt,
-                 begin_.y() - width / 2,
-                 end_.x() + endExt,
-                 end_.y() + width / 2);
-    } else {
-      boxIn.init(begin_.x() - width / 2,
-                 begin_.y() - beginExt,
-                 end_.x() + width / 2,
-                 end_.y() + endExt);
+      return Rect(begin_.x() - beginExt,
+                  begin_.y() - width / 2,
+                  end_.x() + endExt,
+                  end_.y() + width / 2);
     }
+    return Rect(begin_.x() - width / 2,
+                begin_.y() - beginExt,
+                end_.x() + width / 2,
+                end_.y() + endExt);
   }
   void move(const dbTransform& xform) override
   {
@@ -644,10 +629,9 @@ class frPathSeg : public frShape
  protected:
   Point begin_;  // begin always smaller than end, assumed
   Point end_;
-  frLayerNum layer_;
+  frLayerNum layer_{0};
   frSegStyle style_;
-  frBlockObject* owner_;
-  bool tapered_;
+  bool tapered_{false};
   frListIter<std::unique_ptr<frShape>> iter_;
 
   template <class Archive>
@@ -658,13 +642,10 @@ class frPathSeg : public frShape
     (ar) & end_;
     (ar) & layer_;
     (ar) & style_;
-    (ar) & owner_;
     (ar) & tapered_;
     // iter is handled by the owner
   }
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

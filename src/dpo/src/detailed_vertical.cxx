@@ -34,109 +34,74 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
-// Includes.
 ////////////////////////////////////////////////////////////////////////////////
 #include "detailed_vertical.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
-#include <algorithm>
-#include <boost/format.hpp>
+
 #include <boost/tokenizer.hpp>
-#include <cmath>
-#include <iostream>
-#include <stack>
-#include <utility>
-#include "utl/Logger.h"
+
 #include "detailed_hpwl.h"
 #include "detailed_manager.h"
 #include "detailed_orient.h"
 #include "detailed_segment.h"
 #include "rectangle.h"
 #include "utility.h"
-#ifdef USE_OPENMP
-#include <parallel/algorithm>
-#include "omp.h"
-#endif
+#include "utl/Logger.h"
 
 using utl::DPO;
 
 namespace dpo {
 
 ////////////////////////////////////////////////////////////////////////////////
-// Defines.
 ////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-// Classes.
-////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-DetailedVerticalSwap::DetailedVerticalSwap(Architecture* arch, Network* network,
+DetailedVerticalSwap::DetailedVerticalSwap(Architecture* arch,
+                                           Network* network,
                                            RoutingParams* rt)
     : DetailedGenerator("vertical swap"),
-      m_mgr(0),
-      m_arch(arch),
-      m_network(network),
-      m_rt(rt),
-      m_skipNetsLargerThanThis(100),
-      m_traversal(0),
-      m_attempts(0),
-      m_moves(0),
-      m_swaps(0)
+      mgr_(nullptr),
+      arch_(arch),
+      network_(network),
+      rt_(rt),
+      skipNetsLargerThanThis_(100),
+      traversal_(0),
+      attempts_(0),
+      moves_(0),
+      swaps_(0)
 {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 DetailedVerticalSwap::DetailedVerticalSwap()
-    : DetailedGenerator("vertical swap"),
-      m_mgr(0),
-      m_arch(0),
-      m_network(0),
-      m_rt(0),
-      m_skipNetsLargerThanThis(100),
-      m_traversal(0),
-      m_attempts(0),
-      m_moves(0),
-      m_swaps(0)
+    : DetailedVerticalSwap(nullptr, nullptr, nullptr)
 {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-DetailedVerticalSwap::~DetailedVerticalSwap() {}
-
-//////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////
-void DetailedVerticalSwap::run(DetailedMgr* mgrPtr, std::string command) {
+void DetailedVerticalSwap::run(DetailedMgr* mgrPtr, const std::string& command)
+{
   // A temporary interface to allow for a string which we will decode to create
   // the arguments.
-  std::string scriptString = command;
   boost::char_separator<char> separators(" \r\t\n;");
-  boost::tokenizer<boost::char_separator<char> > tokens(scriptString,
-                                                        separators);
+  boost::tokenizer<boost::char_separator<char>> tokens(command, separators);
   std::vector<std::string> args;
-  for (boost::tokenizer<boost::char_separator<char> >::iterator it =
-           tokens.begin();
-       it != tokens.end(); it++) {
-    args.push_back(*it);
+  for (const auto& token : tokens) {
+    args.push_back(token);
   }
   run(mgrPtr, args);
 }
 
-//////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 void DetailedVerticalSwap::run(DetailedMgr* mgrPtr,
-                               std::vector<std::string>& args) {
+                               const std::vector<std::string>& args)
+{
   // Given the arguments, figure out which routine to run to do the reordering.
 
-  m_mgr = mgrPtr;
-  m_arch = m_mgr->getArchitecture();
-  m_network = m_mgr->getNetwork();
-  m_rt = m_mgr->getRoutingParams();
+  mgr_ = mgrPtr;
+  arch_ = mgr_->getArchitecture();
+  network_ = mgr_->getNetwork();
+  rt_ = mgr_->getRoutingParams();
 
   int passes = 1;
   double tol = 0.01;
@@ -150,12 +115,11 @@ void DetailedVerticalSwap::run(DetailedMgr* mgrPtr,
   passes = std::max(passes, 1);
   tol = std::max(tol, 0.01);
 
-  double last_hpwl, curr_hpwl, init_hpwl, hpwl_x, hpwl_y;
-
-  curr_hpwl = Utility::hpwl(m_network, hpwl_x, hpwl_y);
-  init_hpwl = curr_hpwl;
+  double hpwl_x, hpwl_y;
+  double curr_hpwl = Utility::hpwl(network_, hpwl_x, hpwl_y);
+  const double init_hpwl = curr_hpwl;
   for (int p = 1; p <= passes; p++) {
-    last_hpwl = curr_hpwl;
+    const double last_hpwl = curr_hpwl;
 
     // XXX: Actually, vertical swapping is nothing more than random
     // greedy improvement in which the move generating is done
@@ -163,125 +127,128 @@ void DetailedVerticalSwap::run(DetailedMgr* mgrPtr,
     // region for each candidate cell.
     verticalSwap();
 
-    curr_hpwl = Utility::hpwl(m_network, hpwl_x, hpwl_y);
+    curr_hpwl = Utility::hpwl(network_, hpwl_x, hpwl_y);
 
-    m_mgr->getLogger()->info(
-        DPO, 308, "Pass {:3d} of vertical swaps; hpwl is {:.6e}.", p,
-        curr_hpwl);
+    mgr_->getLogger()->info(DPO,
+                            308,
+                            "Pass {:3d} of vertical swaps; hpwl is {:.6e}.",
+                            p,
+                            curr_hpwl);
 
     if (std::fabs(curr_hpwl - last_hpwl) / last_hpwl <= tol) {
-      //std::cout << "Terminating due to low improvement." << std::endl;
+      // std::cout << "Terminating due to low improvement." << std::endl;
       break;
     }
   }
-  double curr_imp = (((init_hpwl - curr_hpwl) / init_hpwl) * 100.);
-  m_mgr->getLogger()->info(
-      DPO, 309,
-      "End of vertical swaps; objective is {:.6e}, improvement is {:.2f} percent.",
-      curr_hpwl, curr_imp);
+  const double curr_imp = (((init_hpwl - curr_hpwl) / init_hpwl) * 100.);
+  mgr_->getLogger()->info(DPO,
+                          309,
+                          "End of vertical swaps; objective is {:.6e}, "
+                          "improvement is {:.2f} percent.",
+                          curr_hpwl,
+                          curr_imp);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-void DetailedVerticalSwap::verticalSwap() {
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+void DetailedVerticalSwap::verticalSwap()
+{
   // Nothing for than random greedy improvement with only a hpwl objective
   // and done such that every candidate cell is considered once!!!
 
-  m_traversal = 0;
-  m_edgeMask.resize(m_network->getNumEdges());
-  std::fill(m_edgeMask.begin(), m_edgeMask.end(), 0);
+  traversal_ = 0;
+  edgeMask_.resize(network_->getNumEdges());
+  std::fill(edgeMask_.begin(), edgeMask_.end(), 0);
 
-  m_mgr->resortSegments();
+  mgr_->resortSegments();
 
   // Get candidate cells.
-  std::vector<Node*> candidates = m_mgr->m_singleHeightCells;
-  Utility::random_shuffle(candidates.begin(), candidates.end(), m_mgr->m_rng);
+  std::vector<Node*> candidates = mgr_->getSingleHeightCells();
+  mgr_->shuffle(candidates);
 
   // Wirelength objective.
-  DetailedHPWL hpwlObj(m_arch, m_network, m_rt);
-  hpwlObj.init(m_mgr, NULL);  // Ignore orientation.
+  DetailedHPWL hpwlObj(network_);
+  hpwlObj.init(mgr_, nullptr);  // Ignore orientation.
 
   double currHpwl = hpwlObj.curr();
-  double nextHpwl = 0.;
   // Consider each candidate cell once.
-  for (int attempt = 0; attempt < candidates.size(); attempt++) {
-    Node* ndi = candidates[attempt];
-
+  for (Node* ndi : candidates) {
     if (generate(ndi) == false) {
       continue;
     }
 
-    double delta = hpwlObj.delta(m_mgr->m_nMoved, m_mgr->m_movedNodes,
-                                 m_mgr->m_curX, m_mgr->m_curY, m_mgr->m_curOri,
-                                 m_mgr->m_newX, m_mgr->m_newY, m_mgr->m_newOri);
+    const double delta = hpwlObj.delta(mgr_->getNMoved(),
+                                       mgr_->getMovedNodes(),
+                                       mgr_->getCurLeft(),
+                                       mgr_->getCurBottom(),
+                                       mgr_->getCurOri(),
+                                       mgr_->getNewLeft(),
+                                       mgr_->getNewBottom(),
+                                       mgr_->getNewOri());
 
-    nextHpwl = currHpwl - delta;  // -delta is +ve is less.
+    const double nextHpwl = currHpwl - delta;  // -delta is +ve is less.
 
     if (nextHpwl <= currHpwl) {
-      m_mgr->acceptMove();
+      mgr_->acceptMove();
 
       currHpwl = nextHpwl;
     } else {
-      m_mgr->rejectMove();
+      mgr_->rejectMove();
     }
   }
-  return;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-bool DetailedVerticalSwap::getRange(Node* nd, Rectangle& nodeBbox) {
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+bool DetailedVerticalSwap::getRange(Node* nd, Rectangle& nodeBbox)
+{
   // Determines the median location for a node.
 
-  Edge* ed;
-  unsigned mid;
-  unsigned n;
-
-  Pin* pin;
   unsigned t = 0;
 
-  m_xpts.erase(m_xpts.begin(), m_xpts.end());
-  m_ypts.erase(m_ypts.begin(), m_ypts.end());
-  for (n = 0; n < nd->getPins().size(); n++) {
-    pin = nd->getPins()[n];
+  const double xmin = arch_->getMinX();
+  const double xmax = arch_->getMaxX();
+  const double ymin = arch_->getMinY();
+  const double ymax = arch_->getMaxY();
 
-    ed = pin->getEdge();
+  xpts_.clear();
+  ypts_.clear();
+  for (unsigned n = 0; n < nd->getPins().size(); n++) {
+    const Pin* pin = nd->getPins()[n];
+
+    const Edge* ed = pin->getEdge();
 
     nodeBbox.reset();
 
-    int numPins = ed->getPins().size();
+    const int numPins = ed->getNumPins();
     if (numPins <= 1) {
       continue;
-    } else if (numPins > m_skipNetsLargerThanThis) {
+    }
+    if (numPins > skipNetsLargerThanThis_) {
       continue;
-    } else {
-      if (!calculateEdgeBB(ed, nd, nodeBbox)) {
-        continue;
-      }
+    }
+    if (!calculateEdgeBB(ed, nd, nodeBbox)) {
+      continue;
     }
 
     // We've computed an interval for the pin.  We need to alter it to work for
     // the cell center. Also, we need to avoid going off the edge of the chip.
     nodeBbox.set_xmin(
-        std::min(std::max(m_arch->getMinX(), nodeBbox.xmin() - pin->getOffsetX()),
-                 m_arch->getMaxX()));
+        std::min(std::max(xmin, nodeBbox.xmin() - pin->getOffsetX()), xmax));
     nodeBbox.set_xmax(
-        std::max(std::min(m_arch->getMaxX(), nodeBbox.xmax() - pin->getOffsetX()),
-                 m_arch->getMinX()));
+        std::max(std::min(xmax, nodeBbox.xmax() - pin->getOffsetX()), xmin));
     nodeBbox.set_ymin(
-        std::min(std::max(m_arch->getMinY(), nodeBbox.ymin() - pin->getOffsetY()),
-                 m_arch->getMaxY()));
+        std::min(std::max(ymin, nodeBbox.ymin() - pin->getOffsetY()), ymax));
     nodeBbox.set_ymax(
-        std::max(std::min(m_arch->getMaxY(), nodeBbox.ymax() - pin->getOffsetY()),
-                 m_arch->getMinY()));
+        std::max(std::min(ymax, nodeBbox.ymax() - pin->getOffsetY()), ymin));
 
     // Record the location and pin offset used to generate this point.
 
-    m_xpts.push_back(nodeBbox.xmin());
-    m_xpts.push_back(nodeBbox.xmax());
+    xpts_.push_back(nodeBbox.xmin());
+    xpts_.push_back(nodeBbox.xmax());
 
-    m_ypts.push_back(nodeBbox.ymin());
-    m_ypts.push_back(nodeBbox.ymax());
+    ypts_.push_back(nodeBbox.ymin());
+    ypts_.push_back(nodeBbox.ymax());
 
     ++t;
     ++t;
@@ -294,39 +261,39 @@ bool DetailedVerticalSwap::getRange(Node* nd, Rectangle& nodeBbox) {
   }
 
   // Get the median values.
-  mid = t / 2;
+  const unsigned mid = t / 2;
 
-  std::sort(m_xpts.begin(), m_xpts.end());
-  std::sort(m_ypts.begin(), m_ypts.end());
+  std::sort(xpts_.begin(), xpts_.end());
+  std::sort(ypts_.begin(), ypts_.end());
 
-  nodeBbox.set_xmin(m_xpts[mid - 1]);
-  nodeBbox.set_xmax(m_xpts[mid]);
+  nodeBbox.set_xmin(xpts_[mid - 1]);
+  nodeBbox.set_xmax(xpts_[mid]);
 
-  nodeBbox.set_ymin(m_ypts[mid - 1]);
-  nodeBbox.set_ymax(m_ypts[mid]);
+  nodeBbox.set_ymin(ypts_[mid - 1]);
+  nodeBbox.set_ymax(ypts_[mid]);
 
   return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-bool DetailedVerticalSwap::calculateEdgeBB(Edge* ed, Node* nd,
-                                           Rectangle& bbox) {
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+bool DetailedVerticalSwap::calculateEdgeBB(const Edge* ed,
+                                           const Node* nd,
+                                           Rectangle& bbox)
+{
   // Computes the bounding box of an edge.  Node 'nd' is the node to SKIP.
-  double curX, curY;
-
   bbox.reset();
 
   int count = 0;
-  for (int pe = 0; pe < ed->getPins().size(); pe++) {
-    Pin* pin = ed->getPins()[pe];
-
-    Node* other = pin->getNode();
+  for (const Pin* pin : ed->getPins()) {
+    const Node* other = pin->getNode();
     if (other == nd) {
       continue;
     }
-    curX = other->getX() + pin->getOffsetX();
-    curY = other->getY() + pin->getOffsetY();
+    const double curX
+        = other->getLeft() + 0.5 * other->getWidth() + pin->getOffsetX();
+    const double curY
+        = other->getBottom() + 0.5 * other->getHeight() + pin->getOffsetY();
 
     bbox.set_xmin(std::min(curX, bbox.xmin()));
     bbox.set_xmax(std::max(curX, bbox.xmax()));
@@ -336,126 +303,96 @@ bool DetailedVerticalSwap::calculateEdgeBB(Edge* ed, Node* nd,
     ++count;
   }
 
-  return (count == 0) ? false : true;
+  return count != 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-double DetailedVerticalSwap::delta(Node* ndi, double new_x, double new_y) {
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+double DetailedVerticalSwap::delta(Node* ndi, double new_x, double new_y)
+{
   // Compute change in wire length for moving node to new position.
 
   double old_wl = 0.;
   double new_wl = 0.;
-  double x, y;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
+  Rectangle old_box, new_box;
 
-  ++m_traversal;
+  ++traversal_;
   for (int pi = 0; pi < ndi->getPins().size(); pi++) {
-    Pin* pini = ndi->getPins()[pi];
+    const Pin* pini = ndi->getPins()[pi];
 
-    Edge* edi = pini->getEdge();
+    const Edge* edi = pini->getEdge();
 
-    int npins = edi->getPins().size();
-    if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+    const int npins = edi->getNumPins();
+    if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
       continue;
     }
-    if (m_edgeMask[edi->getId()] == m_traversal) {
+    if (edgeMask_[edi->getId()] == traversal_) {
       continue;
     }
-    m_edgeMask[edi->getId()] = m_traversal;
+    edgeMask_[edi->getId()] = traversal_;
 
-    old_xmin = std::numeric_limits<double>::max();
-    old_xmax = -std::numeric_limits<double>::max();
-    old_ymin = std::numeric_limits<double>::max();
-    old_ymax = -std::numeric_limits<double>::max();
+    old_box.reset();
+    new_box.reset();
+    for (const Pin* pinj : edi->getPins()) {
+      const Node* ndj = pinj->getNode();
 
-    new_xmin = std::numeric_limits<double>::max();
-    new_xmax = -std::numeric_limits<double>::max();
-    new_ymin = std::numeric_limits<double>::max();
-    new_ymax = -std::numeric_limits<double>::max();
+      double x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+      double y = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-    for (int pj = 0; pj < edi->getPins().size(); pj++) {
-      Pin* pinj = edi->getPins()[pj];
-
-      Node* ndj = pinj->getNode();
-
-      x = ndj->getX() + pinj->getOffsetX();
-      y = ndj->getY() + pinj->getOffsetY();
-
-      old_xmin = std::min(old_xmin, x);
-      old_xmax = std::max(old_xmax, x);
-      old_ymin = std::min(old_ymin, y);
-      old_ymax = std::max(old_ymax, y);
+      old_box.addPt(x, y);
 
       if (ndj == ndi) {
         x = new_x + pinj->getOffsetX();
         y = new_y + pinj->getOffsetY();
       }
-      new_xmin = std::min(new_xmin, x);
-      new_xmax = std::max(new_xmax, x);
-      new_ymin = std::min(new_ymin, y);
-      new_ymax = std::max(new_ymax, y);
+
+      new_box.addPt(x, y);
     }
-    old_wl += old_xmax - old_xmin + old_ymax - old_ymin;
-    new_wl += new_xmax - new_xmin + new_ymax - new_ymin;
+    old_wl += old_box.getWidth() + old_box.getHeight();
+    new_wl += new_box.getWidth() + new_box.getHeight();
   }
   return old_wl - new_wl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-double DetailedVerticalSwap::delta(Node* ndi, Node* ndj) {
+double DetailedVerticalSwap::delta(Node* ndi, Node* ndj)
+{
   // Compute change in wire length for swapping the two nodes.
 
   double old_wl = 0.;
   double new_wl = 0.;
-  double x, y;
-  double old_xmin, old_xmax, old_ymin, old_ymax;
-  double new_xmin, new_xmax, new_ymin, new_ymax;
-  Node* nodes[2];
+  Rectangle old_box, new_box;
+  const Node* nodes[2];
   nodes[0] = ndi;
   nodes[1] = ndj;
 
-  ++m_traversal;
+  ++traversal_;
   for (int c = 0; c <= 1; c++) {
-    Node* ndi = nodes[c];
-    for (int pi = 0; pi < ndi->getPins().size(); pi++) {
-      Pin* pini = ndi->getPins()[pi];
+    const Node* ndi = nodes[c];
+    for (const Pin* pini : ndi->getPins()) {
+      const Edge* edi = pini->getEdge();
 
-      Edge* edi = pini->getEdge();
-
-      int npins = edi->getPins().size();
-      if (npins <= 1 || npins >= m_skipNetsLargerThanThis) {
+      const int npins = edi->getNumPins();
+      if (npins <= 1 || npins >= skipNetsLargerThanThis_) {
         continue;
       }
-      if (m_edgeMask[edi->getId()] == m_traversal) {
+      if (edgeMask_[edi->getId()] == traversal_) {
         continue;
       }
-      m_edgeMask[edi->getId()] = m_traversal;
+      edgeMask_[edi->getId()] = traversal_;
 
-      old_xmin = std::numeric_limits<double>::max();
-      old_xmax = -std::numeric_limits<double>::max();
-      old_ymin = std::numeric_limits<double>::max();
-      old_ymax = -std::numeric_limits<double>::max();
+      old_box.reset();
+      new_box.reset();
 
-      new_xmin = std::numeric_limits<double>::max();
-      new_xmax = -std::numeric_limits<double>::max();
-      new_ymin = std::numeric_limits<double>::max();
-      new_ymax = -std::numeric_limits<double>::max();
+      for (const Pin* pinj : edi->getPins()) {
+        const Node* ndj = pinj->getNode();
 
-      for (int pj = 0; pj < edi->getPins().size(); pj++) {
-        Pin* pinj = edi->getPins()[pj];
+        double x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+        double y
+            = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-        Node* ndj = pinj->getNode();
-
-        x = ndj->getX() + pinj->getOffsetX();
-        y = ndj->getY() + pinj->getOffsetY();
-
-        old_xmin = std::min(old_xmin, x);
-        old_xmax = std::max(old_xmax, x);
-        old_ymin = std::min(old_ymin, y);
-        old_ymax = std::max(old_ymax, y);
+        old_box.addPt(x, y);
 
         if (ndj == nodes[0]) {
           ndj = nodes[1];
@@ -463,33 +400,30 @@ double DetailedVerticalSwap::delta(Node* ndi, Node* ndj) {
           ndj = nodes[0];
         }
 
-        x = ndj->getX() + pinj->getOffsetX();
-        y = ndj->getY() + pinj->getOffsetY();
+        x = ndj->getLeft() + 0.5 * ndj->getWidth() + pinj->getOffsetX();
+        y = ndj->getBottom() + 0.5 * ndj->getHeight() + pinj->getOffsetY();
 
-        new_xmin = std::min(new_xmin, x);
-        new_xmax = std::max(new_xmax, x);
-        new_ymin = std::min(new_ymin, y);
-        new_ymax = std::max(new_ymax, y);
+        new_box.addPt(x, y);
       }
 
-      old_wl += old_xmax - old_xmin + old_ymax - old_ymin;
-      new_wl += new_xmax - new_xmin + new_ymax - new_ymin;
+      old_wl += old_box.getWidth() + old_box.getHeight();
+      new_wl += new_box.getWidth() + new_box.getHeight();
     }
   }
   return old_wl - new_wl;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-bool DetailedVerticalSwap::generate(Node* ndi) {
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+bool DetailedVerticalSwap::generate(Node* ndi)
+{
   // More or less the same as a global swap, but only attempts to look
   // up or down by a few rows from the current row in the direction
   // of the optimal box.
 
-  double xi = ndi->getX();
-  double yi = ndi->getY();
-
-  int numSingleHeightRows = m_arch->getNumRows();
+  // Center of cell.
+  const double yi = ndi->getBottom() + 0.5 * ndi->getHeight();
+  const double xi = ndi->getLeft() + 0.5 * ndi->getWidth();
 
   // Determine optimal region.
   Rectangle bbox;
@@ -497,118 +431,113 @@ bool DetailedVerticalSwap::generate(Node* ndi) {
     return false;
   }
   // If cell inside box, do nothing.
-  if (xi >= bbox.xmin() && xi <= bbox.xmax() && yi >= bbox.ymin() &&
-      yi <= bbox.ymax()) {
+  if (xi >= bbox.xmin() && xi <= bbox.xmax() && yi >= bbox.ymin()
+      && yi <= bbox.ymax()) {
     return false;
   }
 
-  if (m_mgr->m_reverseCellToSegs[ndi->getId()].size() != 1) {
+  // Only single height cell.
+  if (mgr_->getNumReverseCellToSegs(ndi->getId()) != 1) {
     return false;
   }
-  int si = m_mgr->m_reverseCellToSegs[ndi->getId()][0]->getSegId();
-  int ri = m_mgr->m_reverseCellToSegs[ndi->getId()][0]->getRowId();
 
-  // We can move the cell to anywhere within the optimal box so what
-  // should we do?  I think right now I will simply try to move or
-  // swap it with something near the center of its box.  With regions,
-  // this might not work too well if the box is outside of the region.
-  //
-  // Another choice would be to try a few times with random points
-  // within the optimal region.  Consider this in the future...
-  {
-    double xj = 0.5 * (bbox.xmin() + bbox.xmax());
-    double yj = 0.5 * (bbox.ymin() + bbox.ymax());
+  // Segment and row for bottom of cell.
+  const int si = mgr_->getReverseCellToSegs(ndi->getId())[0]->getSegId();
+  const int ri = mgr_->getReverseCellToSegs(ndi->getId())[0]->getRowId();
 
-    // Get the row closest to the top and the bottom of the bix.
-    // Convert optimal region into optimal set of rows.
-    int rmin = m_arch->find_closest_row(bbox.ymin() - 0.5 * ndi->getHeight());
-    int rmax = m_arch->find_closest_row(bbox.ymax() + 0.5 * ndi->getHeight());
+  // Center of optimal rectangle.
+  const int xj = (int) std::floor(0.5 * (bbox.xmin() + bbox.xmax())
+                                  - 0.5 * ndi->getWidth());
+  int yj = (int) std::floor(0.5 * (bbox.ymin() + bbox.ymax())
+                            - 0.5 * ndi->getHeight());
 
-    if (rmin > ri) {
-      rmin = std::min(numSingleHeightRows - 1, ri + 1);
-      rmax = std::min(numSingleHeightRows - 1, ri + 2);
-    } else if (rmax < ri) {
-      rmax = std::max(0, ri - 1);
-      rmin = std::max(0, ri - 2);
+  // Up or down a few rows depending on whether or not the
+  // center of the optimal rectangle is above or below the
+  // current position.
+  int rj = -1;
+  if (yj > yi) {
+    const int rmin = std::min(arch_->getNumRows() - 1, ri + 1);
+    const int rmax = std::min(arch_->getNumRows() - 1, ri + 2);
+    rj = rmin + mgr_->getRandom(rmax - rmin + 1);
+  } else {
+    const int rmax = std::max(0, ri - 1);
+    const int rmin = std::max(0, ri - 2);
+    rj = rmin + mgr_->getRandom(rmax - rmin + 1);
+  }
+  if (rj == -1) {
+    return false;
+  }
+  yj = arch_->getRow(rj)->getBottom();  // Row alignment.
+  int sj = -1;
+  for (int s = 0; s < mgr_->getNumSegsInRow(rj); s++) {
+    const DetailedSeg* segPtr = mgr_->getSegsInRow(rj)[s];
+    if (xj >= segPtr->getMinX() && xj <= segPtr->getMaxX()) {
+      sj = segPtr->getSegId();
+      break;
     }
+  }
+  if (sj == -1) {
+    return false;
+  }
+  if (ndi->getRegionId() != mgr_->getSegment(sj)->getRegId()) {
+    return false;
+  }
 
-    int rj = rmin + ((*(m_mgr->m_rng))() % (rmax - rmin + 1));
-    yj = m_arch->getRow(rj)->getBottom() + 0.5 * ndi->getHeight();
-    int sj = -1;
-    for (int s = 0; s < m_mgr->m_segsInRow[rj].size(); s++) {
-      DetailedSeg* segPtr = m_mgr->m_segsInRow[rj][s];
-      if (xj >= segPtr->getMinX() && xj <= segPtr->getMaxX()) {
-        sj = segPtr->getSegId();
-        break;
-      }
-    }
-    if (sj == -1) {
-      return false;
-    }
-    if (ndi->getRegionId() != m_mgr->m_segments[sj]->getRegId()) {
-      return false;
-    }
-
-    bool isMoveOkay = false;
-    if (!isMoveOkay) {
-      if (si != sj) {
-        isMoveOkay |= m_mgr->tryMove1(ndi, xi, yi, si, xj, yj, sj);
-      } else {
-        isMoveOkay |= m_mgr->tryMove2(ndi, xi, yi, si, xj, yj, sj);
-      }
-    }
-    if (isMoveOkay) {
-      ++m_moves;
-      return true;
-    }
-
-    bool isSwapOkay = false;
-    if (!isSwapOkay) {
-      isSwapOkay |= m_mgr->trySwap1(ndi, xi, yi, si, xj, yj, sj);
-    }
-    if (isSwapOkay) {
-      ++m_swaps;
-      return true;
-    }
+  if (mgr_->tryMove(ndi, ndi->getLeft(), ndi->getBottom(), si, xj, yj, sj)) {
+    ++moves_;
+    return true;
+  }
+  if (mgr_->trySwap(ndi, ndi->getLeft(), ndi->getBottom(), si, xj, yj, sj)) {
+    ++moves_;
+    return true;
   }
   return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-void DetailedVerticalSwap::init(DetailedMgr* mgr) {
-  m_mgr = mgr;
-  m_arch = mgr->getArchitecture();
-  m_network = mgr->getNetwork();
-  m_rt = mgr->getRoutingParams();
+void DetailedVerticalSwap::init(DetailedMgr* mgr)
+{
+  mgr_ = mgr;
+  arch_ = mgr->getArchitecture();
+  network_ = mgr->getNetwork();
+  rt_ = mgr->getRoutingParams();
 
-  m_traversal = 0;
-  m_edgeMask.resize(m_network->getNumEdges());
-  std::fill(m_edgeMask.begin(), m_edgeMask.end(), 0);
+  traversal_ = 0;
+  edgeMask_.resize(network_->getNumEdges());
+  std::fill(edgeMask_.begin(), edgeMask_.end(), 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 bool DetailedVerticalSwap::generate(DetailedMgr* mgr,
-                                    std::vector<Node*>& candidates) {
-  ++m_attempts;
+                                    std::vector<Node*>& candidates)
+{
+  ++attempts_;
 
-  m_mgr = mgr;
-  m_arch = mgr->getArchitecture();
-  m_network = mgr->getNetwork();
-  m_rt = mgr->getRoutingParams();
+  mgr_ = mgr;
+  arch_ = mgr->getArchitecture();
+  network_ = mgr->getNetwork();
+  rt_ = mgr->getRoutingParams();
 
-  Node* ndi = candidates[(*(m_mgr->m_rng))() % (candidates.size())];
+  Node* ndi = candidates[mgr_->getRandom(candidates.size())];
 
   return generate(ndi);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-void DetailedVerticalSwap::stats() {
-  m_mgr->getLogger()->info( DPO, 336, "Generator {:s}, "
-    "Cumulative attempts {:d}, swaps {:d}, moves {:5d} since last reset.",
-    getName().c_str(), m_attempts, m_swaps, m_moves );
+void DetailedVerticalSwap::stats()
+{
+  mgr_->getLogger()->info(
+      DPO,
+      336,
+      "Generator {:s}, "
+      "Cumulative attempts {:d}, swaps {:d}, moves {:5d} since last reset.",
+      getName().c_str(),
+      attempts_,
+      swaps_,
+      moves_);
 }
 
 }  // namespace dpo

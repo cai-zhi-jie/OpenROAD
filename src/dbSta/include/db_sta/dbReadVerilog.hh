@@ -68,11 +68,11 @@ class dbVerilogNetwork : public ConcreteNetwork
 {
  public:
   dbVerilogNetwork();
-  virtual Cell* findAnyCell(const char* name);
+  Cell* findAnyCell(const char* name) override;
   void init(dbNetwork* db_network);
 
  private:
-  NetworkReader* db_network_;
+  NetworkReader* db_network_ = nullptr;
 };
 
 dbVerilogNetwork* makeDbVerilogNetwork();
@@ -90,6 +90,7 @@ void dbReadVerilog(const char* filename, dbVerilogNetwork* verilog_network);
 void dbLinkDesign(const char* top_cell_name,
                   dbVerilogNetwork* verilog_network,
                   dbDatabase* db,
-                  utl::Logger* logger);
+                  utl::Logger* logger,
+                  bool hierarchy);
 
 }  // namespace ord

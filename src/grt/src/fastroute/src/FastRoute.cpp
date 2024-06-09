@@ -36,20 +36,11 @@
 
 #include "FastRoute.h"
 
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
 #include <algorithm>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <utility>
+#include <unordered_set>
 
+#include "AbstractFastRouteRenderer.h"
 #include "DataType.h"
-#include "gui/gui.h"
 #include "odb/db.h"
 #include "utl/Logger.h"
 
@@ -59,67 +50,63 @@ using utl::GRT;
 
 FastRouteCore::FastRouteCore(odb::dbDatabase* db,
                              utl::Logger* log,
-                             stt::SteinerTreeBuilder* stt_builder,
-                             gui::Gui* gui)
+                             stt::SteinerTreeBuilder* stt_builder)
     : max_degree_(0),
       db_(db),
-      gui_(gui),
-      allow_overflow_(false),
       overflow_iterations_(0),
-      num_nets_(0),
-      layer_orientation_(0),
+      congestion_report_iter_step_(0),
       x_range_(0),
       y_range_(0),
-      new_net_id_(0),
-      seg_count_(0),
-      pin_ind_(0),
       num_adjust_(0),
       v_capacity_(0),
       h_capacity_(0),
       x_grid_(0),
       y_grid_(0),
+      x_grid_max_(0),
+      y_grid_max_(0),
       x_corner_(0),
       y_corner_(0),
-      w_tile_(0),
-      h_tile_(0),
+      tile_size_(0),
       enlarge_(0),
       costheight_(0),
       ahth_(0),
-      num_valid_nets_(0),
       num_layers_(0),
       total_overflow_(0),
+      has_2D_overflow_(false),
       grid_hv_(0),
       verbose_(false),
+      critical_nets_percentage_(10),
       via_cost_(0),
       mazeedge_threshold_(0),
       v_capacity_lb_(0),
       h_capacity_lb_(0),
+      regular_x_(false),
+      regular_y_(false),
       logger_(log),
       stt_builder_(stt_builder),
-      fastrouteRender_(nullptr),
       debug_(new DebugSetting())
 {
+  parasitics_builder_ = nullptr;
 }
 
 FastRouteCore::~FastRouteCore()
 {
-  deleteComponents();
+  clearNets();
 }
 
 void FastRouteCore::clear()
 {
-  deleteComponents();
-}
-
-void FastRouteCore::deleteComponents()
-{
   clearNets();
+
+  num_adjust_ = 0;
+  v_capacity_ = 0;
+  h_capacity_ = 0;
+  total_overflow_ = 0;
+  has_2D_overflow_ = false;
 
   h_edges_.resize(boost::extents[0][0]);
   v_edges_.resize(boost::extents[0][0]);
   seglist_.clear();
-  seglist_index_.clear();
-  seglist_cnt_.clear();
 
   gxs_.clear();
   gys_.clear();
@@ -152,9 +139,6 @@ void FastRouteCore::deleteComponents()
   v_capacity_3D_.clear();
   h_capacity_3D_.clear();
 
-  layer_grid_.resize(boost::extents[0][0]);
-  via_link_.resize(boost::extents[0][0]);
-
   cost_hvh_.clear();
   cost_vhv_.clear();
   cost_h_.clear();
@@ -165,45 +149,23 @@ void FastRouteCore::deleteComponents()
   cost_v_test_.clear();
   cost_tb_test_.clear();
 
-  num_adjust_ = 0;
-  v_capacity_ = 0;
-  h_capacity_ = 0;
+  vertical_blocked_intervals_.clear();
+  horizontal_blocked_intervals_.clear();
 }
 
 void FastRouteCore::clearNets()
 {
+  if (!sttrees_.empty()) {
+    sttrees_.clear();
+  }
+
   for (FrNet* net : nets_) {
     delete net;
   }
   nets_.clear();
-  new_net_id_ = 0;
-  num_nets_ = 0;
-  pin_ind_ = 0;
-  seg_count_ = 0;
-
-  if (!sttrees_.empty()) {
-    for (int i = 0; i < num_valid_nets_; i++) {
-      int deg = sttrees_[i].deg;
-      int numEdges = 2 * deg - 3;
-      for (int edgeID = 0; edgeID < numEdges; edgeID++) {
-        TreeEdge* treeedge = &(sttrees_[i].edges[edgeID]);
-        if (treeedge->len > 0) {
-          treeedge->route.gridsX.clear();
-          treeedge->route.gridsY.clear();
-          treeedge->route.gridsL.clear();
-        }
-      }
-
-      if (sttrees_[i].nodes != nullptr)
-        delete[] sttrees_[i].nodes;
-      sttrees_[i].nodes = nullptr;
-
-      if (sttrees_[i].edges != nullptr)
-        delete[] sttrees_[i].edges;
-      sttrees_[i].edges = nullptr;
-    }
-    sttrees_.clear();
-  }
+  net_ids_.clear();
+  seglist_.clear();
+  db_net_id_map_.clear();
 }
 
 void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
@@ -211,6 +173,7 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
   x_grid_ = x;
   y_grid_ = y;
   num_layers_ = nLayers;
+  layer_directions_.resize(num_layers_);
   if (std::max(x_grid_, y_grid_) >= 1000) {
     x_range_ = std::max(x_grid_, y_grid_);
     y_range_ = std::max(x_grid_, y_grid_);
@@ -221,14 +184,15 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
 
   v_capacity_3D_.resize(num_layers_);
   h_capacity_3D_.resize(num_layers_);
+  last_col_v_capacity_3D_.resize(num_layers_);
+  last_row_h_capacity_3D_.resize(num_layers_);
 
   for (int i = 0; i < num_layers_; i++) {
     v_capacity_3D_[i] = 0;
     h_capacity_3D_[i] = 0;
+    last_col_v_capacity_3D_[i] = 0;
+    last_row_h_capacity_3D_[i] = 0;
   }
-
-  layer_grid_.resize(boost::extents[num_layers_][MAXLEN]);
-  via_link_.resize(boost::extents[num_layers_][MAXLEN]);
 
   hv_.resize(boost::extents[y_range_][x_range_]);
   hyper_v_.resize(boost::extents[y_range_][x_range_]);
@@ -261,82 +225,94 @@ void FastRouteCore::addHCapacity(short horizontalCapacity, int layer)
   h_capacity_ += h_capacity_3D_[layer - 1];
 }
 
-void FastRouteCore::setNumberNets(int nNets)
-{
-  num_nets_ = nNets;
-  nets_.resize(num_nets_);
-  for (int i = 0; i < num_nets_; i++)
-    nets_[i] = new FrNet;
-  seglist_index_.resize(num_nets_ + 1);
-}
-
 void FastRouteCore::setLowerLeft(int x, int y)
 {
   x_corner_ = x;
   y_corner_ = y;
 }
 
-void FastRouteCore::setTileSize(int width, int height)
+void FastRouteCore::setTileSize(int size)
 {
-  w_tile_ = width;
-  h_tile_ = height;
+  tile_size_ = size;
 }
 
-void FastRouteCore::setLayerOrientation(int x)
+void FastRouteCore::addLayerDirection(int layer_idx,
+                                      const odb::dbTechLayerDir& direction)
 {
-  layer_orientation_ = x;
+  layer_directions_[layer_idx] = direction;
 }
 
-void FastRouteCore::addPin(int netID, int x, int y, int layer)
+FrNet* FastRouteCore::addNet(odb::dbNet* db_net,
+                             bool is_clock,
+                             int driver_idx,
+                             int cost,
+                             int min_layer,
+                             int max_layer,
+                             float slack,
+                             std::vector<int>* edge_cost_per_layer)
 {
-  FrNet* net = nets_[netID];
-  net->pinX.push_back(x);
-  net->pinY.push_back(y);
-  net->pinL.push_back(layer);
-}
-
-int FastRouteCore::addNet(odb::dbNet* db_net,
-                          int num_pins,
-                          bool is_clock,
-                          int driver_idx,
-                          int cost,
-                          int min_layer,
-                          int max_layer,
-                          std::vector<int> edge_cost_per_layer)
-{
-  const int netID = new_net_id_;
-  FrNet* net = nets_[new_net_id_];
-  pin_ind_ = num_pins;
-  net->db_net = db_net;
-  net->numPins = num_pins;
-  net->deg = pin_ind_;
-  net->is_clock = is_clock;
-  net->driver_idx = driver_idx;
-  net->edgeCost = cost;
-  net->minLayer = min_layer;
-  net->maxLayer = max_layer;
-  net->edge_cost_per_layer = edge_cost_per_layer;
-
-  seglist_index_[new_net_id_] = seg_count_;
-  new_net_id_++;
-  // at most (2*num_pins-2) nodes -> (2*num_pins-3) segs_ for a net
-  seg_count_ += 2 * pin_ind_ - 3;
-  return netID;
-}
-
-void FastRouteCore::init_usage()
-{
-  for (int i = 0; i < y_grid_; i++) {
-    for (int j = 0; j < (x_grid_ - 1); j++) {
-      h_edges_[i][j].usage = 0;
-    }
+  int netID;
+  bool exists;
+  FrNet* net;
+  getNetId(db_net, netID, exists);
+  if (exists) {
+    net = nets_[netID];
+    clearNetRoute(netID);
+    seglist_[netID].clear();
+  } else {
+    net = new FrNet;
+    nets_.push_back(net);
+    netID = nets_.size() - 1;
+    db_net_id_map_[db_net] = netID;
+    // at most (2*num_pins-2) nodes -> (2*num_pins-3) segs_ for a net
+    seglist_.emplace_back();
+    sttrees_.emplace_back();
+    gxs_.emplace_back();
+    gys_.emplace_back();
+    gs_.emplace_back();
   }
+  net->reset(db_net,
+             is_clock,
+             driver_idx,
+             cost,
+             min_layer,
+             max_layer,
+             slack,
+             edge_cost_per_layer);
+  net_ids_.push_back(netID);
 
-  for (int i = 0; i < (y_grid_ - 1); i++) {
-    for (int j = 0; j < x_grid_; j++) {
-      v_edges_[i][j].usage = 0;
-    }
+  return net;
+}
+
+void FastRouteCore::removeNet(odb::dbNet* db_net)
+{
+  // TODO The deleted flag is a temporary solution. Correctly delete the
+  // FrNet and update the nets list
+  if (db_net_id_map_.find(db_net) != db_net_id_map_.end()) {
+    int netID = db_net_id_map_[db_net];
+    clearNetRoute(netID);
+    FrNet* delete_net = nets_[netID];
+    nets_[netID] = nullptr;
+    delete delete_net;
+    db_net_id_map_.erase(db_net);
   }
+}
+
+void FastRouteCore::getNetId(odb::dbNet* db_net, int& net_id, bool& exists)
+{
+  auto itr = db_net_id_map_.find(db_net);
+  exists = itr != db_net_id_map_.end();
+  net_id = exists ? itr->second : 0;
+}
+
+void FastRouteCore::clearNetRoute(const int netID)
+{
+  // clear used resources for the net route
+  releaseNetResources(netID);
+
+  // clear stree
+  sttrees_[netID].nodes.clear();
+  sttrees_[netID].edges.clear();
 }
 
 void FastRouteCore::initEdges()
@@ -345,56 +321,42 @@ void FastRouteCore::initEdges()
   v_capacity_lb_ = LB * v_capacity_;
   h_capacity_lb_ = LB * h_capacity_;
 
-  // TODO: check this, there was an if pin_ind_ > 1 && pin_ind_ < 2000
-  if (pin_ind_ > 1) {
-    seglist_index_[new_net_id_] = seg_count_;  // the end pointer of the seglist
-  }
-  num_valid_nets_ = new_net_id_;
-
   // allocate memory and initialize for edges
 
   h_edges_.resize(boost::extents[y_grid_][x_grid_ - 1]);
   v_edges_.resize(boost::extents[y_grid_ - 1][x_grid_]);
 
-  init_usage();
-
   v_edges_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
   h_edges_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
 
-  // 2D edge initialization
-  int TC = 0;
   for (int i = 0; i < y_grid_; i++) {
     for (int j = 0; j < x_grid_ - 1; j++) {
+      // 2D edge initialization
       h_edges_[i][j].cap = h_capacity_;
-      TC += h_capacity_;
       h_edges_[i][j].usage = 0;
       h_edges_[i][j].est_usage = 0;
       h_edges_[i][j].red = 0;
       h_edges_[i][j].last_usage = 0;
-    }
-  }
-  for (int i = 0; i < y_grid_ - 1; i++) {
-    for (int j = 0; j < x_grid_; j++) {
-      v_edges_[i][j].cap = v_capacity_;
-      TC += v_capacity_;
-      v_edges_[i][j].usage = 0;
-      v_edges_[i][j].est_usage = 0;
-      v_edges_[i][j].red = 0;
-      v_edges_[i][j].last_usage = 0;
-    }
-  }
 
-  // 3D edge initialization
-  for (int k = 0; k < num_layers_; k++) {
-    for (int i = 0; i < y_grid_; i++) {
-      for (int j = 0; j < x_grid_; j++) {
+      // 3D edge initialization
+      for (int k = 0; k < num_layers_; k++) {
         h_edges_3D_[k][i][j].cap = h_capacity_3D_[k];
         h_edges_3D_[k][i][j].usage = 0;
         h_edges_3D_[k][i][j].red = 0;
       }
     }
-    for (int i = 0; i < y_grid_; i++) {
-      for (int j = 0; j < x_grid_; j++) {
+  }
+  for (int i = 0; i < y_grid_ - 1; i++) {
+    for (int j = 0; j < x_grid_; j++) {
+      // 2D edge initialization
+      v_edges_[i][j].cap = v_capacity_;
+      v_edges_[i][j].usage = 0;
+      v_edges_[i][j].est_usage = 0;
+      v_edges_[i][j].red = 0;
+      v_edges_[i][j].last_usage = 0;
+
+      // 3D edge initialization
+      for (int k = 0; k < num_layers_; k++) {
         v_edges_3D_[k][i][j].cap = v_capacity_3D_[k];
         v_edges_3D_[k][i][j].usage = 0;
         v_edges_3D_[k][i][j].red = 0;
@@ -408,52 +370,6 @@ void FastRouteCore::setNumAdjustments(int nAdjustments)
   num_adjust_ = nAdjustments;
 }
 
-int FastRouteCore::getEdgeCurrentResource(int x1,
-                                          int y1,
-                                          int l1,
-                                          int x2,
-                                          int y2,
-                                          int l2)
-{
-  int resource = 0;
-
-  const int k = l1 - 1;
-  if (y1 == y2) {
-    resource = h_edges_3D_[k][y1][x1].cap - h_edges_3D_[k][y1][x1].usage;
-  } else if (x1 == x2) {
-    resource = v_edges_3D_[k][y1][x1].cap - v_edges_3D_[k][y1][x1].usage;
-  } else {
-    logger_->error(
-        GRT,
-        212,
-        "Cannot get edge resource: edge is not vertical or horizontal.");
-  }
-
-  return resource;
-}
-
-int FastRouteCore::getEdgeCurrentUsage(int x1,
-                                       int y1,
-                                       int l1,
-                                       int x2,
-                                       int y2,
-                                       int l2)
-{
-  int usage = 0;
-
-  const int k = l1 - 1;
-  if (y1 == y2) {
-    usage = h_edges_3D_[k][y1][x1].usage;
-  } else if (x1 == x2) {
-    usage = v_edges_3D_[k][y1][x1].usage;
-  } else {
-    logger_->error(
-        GRT, 213, "Cannot get edge usage: edge is not vertical or horizontal.");
-  }
-
-  return usage;
-}
-
 void FastRouteCore::setMaxNetDegree(int deg)
 {
   max_degree_ = deg;
@@ -461,21 +377,20 @@ void FastRouteCore::setMaxNetDegree(int deg)
 
 void FastRouteCore::addAdjustment(int x1,
                                   int y1,
-                                  int l1,
                                   int x2,
                                   int y2,
-                                  int l2,
+                                  int layer,
                                   int reducedCap,
                                   bool isReduce)
 {
-  const int k = l1 - 1;
+  const int k = layer - 1;
 
-  if (y1 == y2)  // horizontal edge
-  {
+  if (y1 == y2) {
+    // horizontal edge
     const int cap = h_edges_3D_[k][y1][x1].cap;
     int reduce;
 
-    if (((int) cap - reducedCap) < 0) {
+    if (cap - reducedCap < 0) {
       if (isReduce) {
         if (verbose_)
           logger_->warn(GRT,
@@ -490,11 +405,12 @@ void FastRouteCore::addAdjustment(int x1,
     }
 
     h_edges_3D_[k][y1][x1].cap = reducedCap;
-    h_edges_3D_[k][y1][x1].red = reduce;
 
     if (!isReduce) {
       const int increase = reducedCap - cap;
       h_edges_[y1][x1].cap += increase;
+    } else {
+      h_edges_3D_[k][y1][x1].red += reduce;
     }
 
     h_edges_[y1][x1].cap -= reduce;
@@ -504,7 +420,7 @@ void FastRouteCore::addAdjustment(int x1,
     const int cap = v_edges_3D_[k][y1][x1].cap;
     int reduce;
 
-    if (((int) cap - reducedCap) < 0) {
+    if (cap - reducedCap < 0) {
       if (isReduce) {
         if (verbose_)
           logger_->warn(GRT,
@@ -519,11 +435,12 @@ void FastRouteCore::addAdjustment(int x1,
     }
 
     v_edges_3D_[k][y1][x1].cap = reducedCap;
-    v_edges_3D_[k][y1][x1].red = reduce;
 
     if (!isReduce) {
       int increase = reducedCap - cap;
       v_edges_[y1][x1].cap += increase;
+    } else {
+      v_edges_3D_[k][y1][x1].red += reduce;
     }
 
     v_edges_[y1][x1].cap -= reduce;
@@ -540,19 +457,19 @@ void FastRouteCore::applyVerticalAdjustments(const odb::Point& first_tile,
   for (int x = first_tile.getX(); x <= last_tile.getX(); x++) {
     for (int y = first_tile.getY(); y < last_tile.getY(); y++) {
       if (x == first_tile.getX()) {
-        int edge_cap = getEdgeCapacity(x, y, layer, x, y + 1, layer);
+        int edge_cap = getEdgeCapacity(x, y, x, y + 1, layer);
         edge_cap -= first_tile_reduce;
         if (edge_cap < 0)
           edge_cap = 0;
-        addAdjustment(x, y, layer, x, y + 1, layer, edge_cap, true);
+        addAdjustment(x, y, x, y + 1, layer, edge_cap, true);
       } else if (x == last_tile.getX()) {
-        int edge_cap = getEdgeCapacity(x, y, layer, x, y + 1, layer);
+        int edge_cap = getEdgeCapacity(x, y, x, y + 1, layer);
         edge_cap -= last_tile_reduce;
         if (edge_cap < 0)
           edge_cap = 0;
-        addAdjustment(x, y, layer, x, y + 1, layer, edge_cap, true);
+        addAdjustment(x, y, x, y + 1, layer, edge_cap, true);
       } else {
-        addAdjustment(x, y, layer, x, y + 1, layer, 0, true);
+        addAdjustment(x, y, x, y + 1, layer, 0, true);
       }
     }
   }
@@ -567,47 +484,127 @@ void FastRouteCore::applyHorizontalAdjustments(const odb::Point& first_tile,
   for (int x = first_tile.getX(); x < last_tile.getX(); x++) {
     for (int y = first_tile.getY(); y <= last_tile.getY(); y++) {
       if (y == first_tile.getY()) {
-        int edge_cap = getEdgeCapacity(x, y, layer, x + 1, y, layer);
+        int edge_cap = getEdgeCapacity(x, y, x + 1, y, layer);
         edge_cap -= first_tile_reduce;
         if (edge_cap < 0)
           edge_cap = 0;
-        addAdjustment(x, y, layer, x + 1, y, layer, edge_cap, true);
+        addAdjustment(x, y, x + 1, y, layer, edge_cap, true);
       } else if (y == last_tile.getY()) {
-        int edge_cap = getEdgeCapacity(x, y, layer, x + 1, y, layer);
+        int edge_cap = getEdgeCapacity(x, y, x + 1, y, layer);
         edge_cap -= last_tile_reduce;
         if (edge_cap < 0)
           edge_cap = 0;
-        addAdjustment(x, y, layer, x + 1, y, layer, edge_cap, true);
+        addAdjustment(x, y, x + 1, y, layer, edge_cap, true);
       } else {
-        addAdjustment(x, y, layer, x + 1, y, layer, 0, true);
+        addAdjustment(x, y, x + 1, y, layer, 0, true);
       }
     }
   }
 }
 
-int FastRouteCore::getEdgeCapacity(int x1,
-                                   int y1,
-                                   int l1,
-                                   int x2,
-                                   int y2,
-                                   int l2)
+void FastRouteCore::addVerticalAdjustments(
+    const odb::Point& first_tile,
+    const odb::Point& last_tile,
+    const int layer,
+    const interval<int>::type& first_tile_reduce_interval,
+    const interval<int>::type& last_tile_reduce_interval)
 {
-  int cap = 0;
+  // add intervals to set for each tile
+  for (int x = first_tile.getX(); x <= last_tile.getX(); x++) {
+    for (int y = first_tile.getY(); y < last_tile.getY(); y++) {
+      if (x == first_tile.getX()) {
+        vertical_blocked_intervals_[std::make_tuple(x, y, layer)]
+            += first_tile_reduce_interval;
+      } else if (x == last_tile.getX()) {
+        vertical_blocked_intervals_[std::make_tuple(x, y, layer)]
+            += last_tile_reduce_interval;
+      } else {
+        addAdjustment(x, y, x, y + 1, layer, 0, true);
+      }
+    }
+  }
+}
 
-  const int k = l1 - 1;
+void FastRouteCore::addHorizontalAdjustments(
+    const odb::Point& first_tile,
+    const odb::Point& last_tile,
+    const int layer,
+    const interval<int>::type& first_tile_reduce_interval,
+    const interval<int>::type& last_tile_reduce_interval)
+{
+  // add intervals to each tiles
+  for (int x = first_tile.getX(); x < last_tile.getX(); x++) {
+    for (int y = first_tile.getY(); y <= last_tile.getY(); y++) {
+      if (y == first_tile.getY()) {
+        horizontal_blocked_intervals_[std::make_tuple(x, y, layer)]
+            += first_tile_reduce_interval;
+      } else if (y == last_tile.getY()) {
+        horizontal_blocked_intervals_[std::make_tuple(x, y, layer)]
+            += last_tile_reduce_interval;
+      } else {
+        addAdjustment(x, y, x + 1, y, layer, 0, true);
+      }
+    }
+  }
+}
+
+void FastRouteCore::initBlockedIntervals(std::vector<int>& track_space)
+{
+  // Calculate reduce for vertical tiles
+  for (const auto& [tile, intervals] : vertical_blocked_intervals_) {
+    int x = std::get<0>(tile);
+    int y = std::get<1>(tile);
+    int layer = std::get<2>(tile);
+    int edge_cap = getEdgeCapacity(x, y, x, y + 1, layer);
+    if (edge_cap > 0) {
+      int reduce = 0;
+      for (const auto& interval_it : intervals) {
+        reduce += ceil(static_cast<float>(
+                           std::abs(interval_it.upper() - interval_it.lower()))
+                       / track_space[layer - 1]);
+      }
+      edge_cap -= reduce;
+      if (edge_cap < 0)
+        edge_cap = 0;
+      addAdjustment(x, y, x, y + 1, layer, edge_cap, true);
+    }
+  }
+  // Calculate reduce for horizontal tiles
+  for (const auto& [tile, intervals] : horizontal_blocked_intervals_) {
+    int x = std::get<0>(tile);
+    int y = std::get<1>(tile);
+    int layer = std::get<2>(tile);
+    int edge_cap = getEdgeCapacity(x, y, x + 1, y, layer);
+    if (edge_cap > 0) {
+      int reduce = 0;
+      for (const auto& interval_it : intervals) {
+        reduce += ceil(static_cast<float>(
+                           std::abs(interval_it.upper() - interval_it.lower()))
+                       / track_space[layer - 1]);
+      }
+      edge_cap -= reduce;
+      if (edge_cap < 0)
+        edge_cap = 0;
+      addAdjustment(x, y, x + 1, y, layer, edge_cap, true);
+    }
+  }
+}
+
+int FastRouteCore::getEdgeCapacity(int x1, int y1, int x2, int y2, int layer)
+{
+  const int k = layer - 1;
 
   if (y1 == y2) {  // horizontal edge
-    cap = h_edges_3D_[k][y1][x1].cap;
+    return h_edges_3D_[k][y1][x1].cap;
   } else if (x1 == x2) {  // vertical edge
-    cap = v_edges_3D_[k][y1][x1].cap;
+    return v_edges_3D_[k][y1][x1].cap;
   } else {
     logger_->error(
         GRT,
         214,
         "Cannot get edge capacity: edge is not vertical or horizontal.");
+    return 0;
   }
-
-  return cap;
 }
 
 int FastRouteCore::getEdgeCapacity(FrNet* net,
@@ -618,7 +615,7 @@ int FastRouteCore::getEdgeCapacity(FrNet* net,
   int cap = 0;
 
   // get 2D edge capacity respecting layer restrictions
-  for (int l = net->minLayer; l <= net->maxLayer; l++) {
+  for (int l = net->getMinLayer(); l <= net->getMaxLayer(); l++) {
     if (direction == EdgeDirection::Horizontal) {
       cap += h_edges_3D_[l][y1][x1].cap;
     } else {
@@ -629,62 +626,28 @@ int FastRouteCore::getEdgeCapacity(FrNet* net,
   return cap;
 }
 
-void FastRouteCore::setEdgeCapacity(int x1,
-                                    int y1,
-                                    int l1,
-                                    int x2,
-                                    int y2,
-                                    int l2,
-                                    int newCap)
+void FastRouteCore::incrementEdge3DUsage(int x1,
+                                         int y1,
+                                         int x2,
+                                         int y2,
+                                         int layer)
 {
-  const int k = l1 - 1;
+  const int k = layer - 1;
 
   if (y1 == y2) {  // horizontal edge
-    const int currCap = h_edges_3D_[k][y1][x1].cap;
-    h_edges_3D_[k][y1][x1].cap = newCap;
-
-    const int reduce = currCap - newCap;
-    h_edges_[y1][x1].cap -= reduce;
+    for (int x = x1; x < x2; x++) {
+      h_edges_3D_[k][y1][x].usage++;
+    }
   } else if (x1 == x2) {  // vertical edge
-    const int currCap = v_edges_3D_[k][y1][x1].cap;
-    v_edges_3D_[k][y1][x1].cap = newCap;
-
-    const int reduce = currCap - newCap;
-    v_edges_[y1][x1].cap -= reduce;
-  }
-}
-
-void FastRouteCore::setEdgeUsage(int x1,
-                                 int y1,
-                                 int l1,
-                                 int x2,
-                                 int y2,
-                                 int l2,
-                                 int newUsage)
-{
-  const int k = l1 - 1;
-
-  if (y1 == y2) {  // horizontal edge
-    h_edges_3D_[k][y1][x1].usage = newUsage;
-
-    h_edges_[y1][x1].usage += newUsage;
-  } else if (x1 == x2) {  // vertical edge
-    v_edges_3D_[k][y1][x1].usage = newUsage;
-
-    v_edges_[y1][x1].usage += newUsage;
+    for (int y = y1; y < y2; y++) {
+      v_edges_3D_[k][y][x1].usage++;
+    }
   }
 }
 
 void FastRouteCore::initAuxVar()
 {
   tree_order_cong_.clear();
-
-  seglist_cnt_.resize(num_valid_nets_);
-  seglist_.resize(seg_count_);
-  sttrees_.resize(num_valid_nets_);
-  gxs_.resize(num_valid_nets_);
-  gys_.resize(num_valid_nets_);
-  gs_.resize(num_valid_nets_);
 
   grid_hv_ = x_range_ * y_range_;
 
@@ -697,33 +660,50 @@ void FastRouteCore::initAuxVar()
 NetRouteMap FastRouteCore::getRoutes()
 {
   NetRouteMap routes;
-  for (int netID = 0; netID < num_valid_nets_; netID++) {
-    odb::dbNet* db_net = nets_[netID]->db_net;
+  for (const int& netID : net_ids_) {
+    odb::dbNet* db_net = nets_[netID]->getDbNet();
     GRoute& route = routes[db_net];
+    std::unordered_set<GSegment, GSegmentHash> net_segs;
 
-    TreeEdge* treeedges = sttrees_[netID].edges;
-    const int deg = sttrees_[netID].deg;
+    const auto& treeedges = sttrees_[netID].edges;
+    const int num_edges = sttrees_[netID].num_edges();
 
-    for (int edgeID = 0; edgeID < 2 * deg - 3; edgeID++) {
-      TreeEdge* treeedge = &(treeedges[edgeID]);
-      if (treeedge->len > 0) {
+    for (int edgeID = 0; edgeID < num_edges; edgeID++) {
+      const TreeEdge* treeedge = &(treeedges[edgeID]);
+      if (treeedge->len > 0 || treeedge->route.routelen > 0) {
         int routeLen = treeedge->route.routelen;
         const std::vector<short>& gridsX = treeedge->route.gridsX;
         const std::vector<short>& gridsY = treeedge->route.gridsY;
         const std::vector<short>& gridsL = treeedge->route.gridsL;
-        int lastX = w_tile_ * (gridsX[0] + 0.5) + x_corner_;
-        int lastY = h_tile_ * (gridsY[0] + 0.5) + y_corner_;
+        int lastX = tile_size_ * (gridsX[0] + 0.5) + x_corner_;
+        int lastY = tile_size_ * (gridsY[0] + 0.5) + y_corner_;
         int lastL = gridsL[0];
         for (int i = 1; i <= routeLen; i++) {
-          const int xreal = w_tile_ * (gridsX[i] + 0.5) + x_corner_;
-          const int yreal = h_tile_ * (gridsY[i] + 0.5) + y_corner_;
+          const int xreal = tile_size_ * (gridsX[i] + 0.5) + x_corner_;
+          const int yreal = tile_size_ * (gridsY[i] + 0.5) + y_corner_;
 
           GSegment segment
               = GSegment(lastX, lastY, lastL + 1, xreal, yreal, gridsL[i] + 1);
+
           lastX = xreal;
           lastY = yreal;
           lastL = gridsL[i];
-          route.push_back(segment);
+          if (net_segs.find(segment) == net_segs.end()) {
+            if (segment.init_layer != segment.final_layer) {
+              GSegment invet_via = GSegment(segment.final_x,
+                                            segment.final_y,
+                                            segment.final_layer,
+                                            segment.init_x,
+                                            segment.init_y,
+                                            segment.init_layer);
+              if (net_segs.find(invet_via) != net_segs.end()) {
+                continue;
+              }
+            }
+
+            net_segs.insert(segment);
+            route.push_back(segment);
+          }
         }
       }
     }
@@ -732,8 +712,113 @@ NetRouteMap FastRouteCore::getRoutes()
   return routes;
 }
 
+NetRouteMap FastRouteCore::getPlanarRoutes()
+{
+  NetRouteMap routes;
+
+  // Get routes before layer assignment
+
+  for (const int& netID : net_ids_) {
+    auto fr_net = nets_[netID];
+    odb::dbNet* db_net = fr_net->getDbNet();
+    GRoute& route = routes[db_net];
+    std::unordered_set<GSegment, GSegmentHash> net_segs;
+
+    const auto& treeedges = sttrees_[netID].edges;
+    const int num_edges = sttrees_[netID].num_edges();
+
+    for (int edgeID = 0; edgeID < num_edges; edgeID++) {
+      const TreeEdge* treeedge = &(treeedges[edgeID]);
+      if (treeedge->len > 0) {
+        int routeLen = treeedge->route.routelen;
+        const std::vector<short>& gridsX = treeedge->route.gridsX;
+        const std::vector<short>& gridsY = treeedge->route.gridsY;
+        int lastX = tile_size_ * (gridsX[0] + 0.5) + x_corner_;
+        int lastY = tile_size_ * (gridsY[0] + 0.5) + y_corner_;
+
+        // defines the layer used for vertical edges are still 2D
+        int layer_h = 0;
+
+        // defines the layer used for horizontal edges are still 2D
+        int layer_v = 0;
+
+        if (layer_directions_[nets_[netID]->getMinLayer()]
+            == odb::dbTechLayerDir::VERTICAL) {
+          layer_h = nets_[netID]->getMinLayer() + 1;
+          layer_v = nets_[netID]->getMinLayer();
+        } else {
+          layer_h = nets_[netID]->getMinLayer();
+          layer_v = nets_[netID]->getMinLayer() + 1;
+        }
+        int second_x = tile_size_ * (gridsX[1] + 0.5) + x_corner_;
+        int lastL = (lastX == second_x) ? layer_v : layer_h;
+
+        for (int i = 1; i <= routeLen; i++) {
+          const int xreal = tile_size_ * (gridsX[i] + 0.5) + x_corner_;
+          const int yreal = tile_size_ * (gridsY[i] + 0.5) + y_corner_;
+          GSegment segment;
+          if (lastX == xreal) {
+            // if change direction add a via to change the layer
+            if (lastL == layer_h) {
+              segment = GSegment(
+                  lastX, lastY, lastL + 1, lastX, lastY, layer_v + 1);
+              if (net_segs.find(segment) == net_segs.end()) {
+                net_segs.insert(segment);
+                route.push_back(segment);
+              }
+            }
+            lastL = layer_v;
+            segment
+                = GSegment(lastX, lastY, lastL + 1, xreal, yreal, lastL + 1);
+          } else {
+            // if change direction add a via to change the layer
+            if (lastL == layer_v) {
+              segment = GSegment(
+                  lastX, lastY, lastL + 1, lastX, lastY, layer_h + 1);
+              if (net_segs.find(segment) == net_segs.end()) {
+                net_segs.insert(segment);
+                route.push_back(segment);
+              }
+            }
+            lastL = layer_h;
+            segment
+                = GSegment(lastX, lastY, lastL + 1, xreal, yreal, lastL + 1);
+          }
+          lastX = xreal;
+          lastY = yreal;
+          if (net_segs.find(segment) == net_segs.end()) {
+            net_segs.insert(segment);
+            route.push_back(segment);
+          }
+        }
+      }
+    }
+  }
+
+  return routes;
+}
+
+void FastRouteCore::getBlockage(odb::dbTechLayer* layer,
+                                int x,
+                                int y,
+                                uint8_t& blockage_h,
+                                uint8_t& blockage_v)
+{
+  int l = layer->getRoutingLevel() - 1;
+  if (x == x_grid_ - 1 && y == y_grid_ - 1 && x_grid_ > 1 && y_grid_ > 1) {
+    blockage_h = h_edges_3D_[l][y][x - 1].red;
+    blockage_v = v_edges_3D_[l][y - 1][x].red;
+  } else {
+    blockage_h = h_edges_3D_[l][y][x].red;
+    blockage_v = v_edges_3D_[l][y][x].red;
+  }
+}
+
 void FastRouteCore::updateDbCongestion()
 {
+  if (h_edges_3D_.num_elements() == 0) {  // no information
+    return;
+  }
   auto block = db_->getChip()->getBlock();
   auto db_gcell = block->getGCellGrid();
   if (db_gcell)
@@ -741,8 +826,8 @@ void FastRouteCore::updateDbCongestion()
   else
     db_gcell = odb::dbGCellGrid::create(block);
 
-  db_gcell->addGridPatternX(x_corner_, x_grid_, w_tile_);
-  db_gcell->addGridPatternY(y_corner_, y_grid_, h_tile_);
+  db_gcell->addGridPatternX(x_corner_, x_grid_, tile_size_);
+  db_gcell->addGridPatternY(y_corner_, y_grid_, tile_size_);
   auto db_tech = db_->getTech();
   for (int k = 0; k < num_layers_; k++) {
     auto layer = db_tech->findRoutingLayer(k + 1);
@@ -750,17 +835,90 @@ void FastRouteCore::updateDbCongestion()
       continue;
     }
 
-    const unsigned short capH = h_capacity_3D_[k];
-    const unsigned short capV = v_capacity_3D_[k];
+    const uint8_t capH = h_capacity_3D_[k];
+    const uint8_t capV = v_capacity_3D_[k];
+    const uint8_t last_row_capH = last_row_h_capacity_3D_[k];
+    const uint8_t last_col_capV = last_col_v_capacity_3D_[k];
+    bool is_horizontal
+        = layer_directions_[k] == odb::dbTechLayerDir::HORIZONTAL;
     for (int y = 0; y < y_grid_; y++) {
-      for (int x = 0; x < x_grid_ - 1; x++) {
-        const unsigned short blockageH = capH - h_edges_3D_[k][y][x].cap;
-        const unsigned short blockageV = capV - v_edges_3D_[k][y][x].cap;
-        const unsigned short usageH = h_edges_3D_[k][y][x].usage + blockageH;
-        const unsigned short usageV = v_edges_3D_[k][y][x].usage + blockageV;
-        db_gcell->setCapacity(layer, x, y, capH, capV, 0);
-        db_gcell->setUsage(layer, x, y, usageH, usageV, 0);
-        db_gcell->setBlockage(layer, x, y, blockageH, blockageV, 0);
+      for (int x = 0; x < x_grid_; x++) {
+        if (is_horizontal) {
+          if (!regular_y_ && y == y_grid_ - 1) {
+            db_gcell->setCapacity(layer, x, y, last_row_capH);
+          } else {
+            db_gcell->setCapacity(layer, x, y, capH);
+          }
+        } else {
+          if (!regular_x_ && x == x_grid_ - 1) {
+            db_gcell->setCapacity(layer, x, y, last_col_capV);
+          } else {
+            db_gcell->setCapacity(layer, x, y, capV);
+          }
+        }
+        if (x == x_grid_ - 1 && y == y_grid_ - 1 && x_grid_ > 1
+            && y_grid_ > 1) {
+          uint8_t blockageH = h_edges_3D_[k][y][x - 1].red;
+          uint8_t blockageV = v_edges_3D_[k][y - 1][x].red;
+          uint8_t usageH = h_edges_3D_[k][y - 1][x - 1].usage + blockageH;
+          uint8_t usageV = v_edges_3D_[k][y - 1][x - 1].usage + blockageV;
+          db_gcell->setUsage(layer, x, y, usageH + usageV);
+        } else {
+          uint8_t blockageH = h_edges_3D_[k][y][x].red;
+          uint8_t blockageV = v_edges_3D_[k][y][x].red;
+          uint8_t usageH = h_edges_3D_[k][y][x].usage + blockageH;
+          uint8_t usageV = v_edges_3D_[k][y][x].usage + blockageV;
+          db_gcell->setUsage(layer, x, y, usageH + usageV);
+        }
+      }
+    }
+  }
+}
+
+void FastRouteCore::getCapacityReductionData(
+    CapacityReductionData& cap_red_data)
+{
+  cap_red_data.resize(x_grid_);
+  for (int x = 0; x < x_grid_; x++) {
+    cap_red_data[x].resize(y_grid_);
+  }
+
+  for (int k = 0; k < num_layers_; k++) {
+    const uint8_t capH = h_capacity_3D_[k];
+    const uint8_t capV = v_capacity_3D_[k];
+    const uint8_t last_row_capH = last_row_h_capacity_3D_[k];
+    const uint8_t last_col_capV = last_col_v_capacity_3D_[k];
+    bool is_horizontal
+        = layer_directions_[k] == odb::dbTechLayerDir::HORIZONTAL;
+    for (int x = 0; x < x_grid_; x++) {
+      for (int y = 0; y < y_grid_; y++) {
+        if (is_horizontal) {
+          if (!regular_y_ && y == y_grid_ - 1) {
+            cap_red_data[x][y].capacity += last_row_capH;
+          } else if (x != x_grid_ - 1 || y == y_grid_ - 1) {
+            // don't add horizontal cap in the last col because there is no
+            // usage there
+            cap_red_data[x][y].capacity += capH;
+          }
+        } else {
+          if (!regular_x_ && x == x_grid_ - 1) {
+            cap_red_data[x][y].capacity += last_col_capV;
+          } else if (y != y_grid_ - 1 || x == x_grid_ - 1) {
+            // don't add vertical cap in the last row because there is no usage
+            // there
+            cap_red_data[x][y].capacity += capV;
+          }
+        }
+        if (x == x_grid_ - 1 && y == y_grid_ - 1 && x_grid_ > 1
+            && y_grid_ > 1) {
+          uint8_t blockageH = h_edges_3D_[k][y][x - 1].red;
+          uint8_t blockageV = v_edges_3D_[k][y - 1][x].red;
+          cap_red_data[x][y].reduction += blockageH + blockageV;
+        } else {
+          uint8_t blockageH = h_edges_3D_[k][y][x].red;
+          uint8_t blockageV = v_edges_3D_[k][y][x].red;
+          cap_red_data[x][y].reduction += blockageH + blockageV;
+        }
       }
     }
   }
@@ -768,18 +926,30 @@ void FastRouteCore::updateDbCongestion()
 
 NetRouteMap FastRouteCore::run()
 {
+  if (netCount() == 0) {
+    return getRoutes();
+  }
+
+  v_used_ggrid_.clear();
+  h_used_ggrid_.clear();
+
   int tUsage;
   int cost_step;
   int maxOverflow = 0;
   int minoflrnd = 0;
   int bwcnt = 0;
 
+  // Init grid variables when debug mode is actived
+  if (debug_->isOn()) {
+    fastrouteRender()->setGridVariables(tile_size_, x_corner_, y_corner_);
+  }
+
   // TODO: check this size
-  max_degree_ = 2 * max_degree_;
-  xcor_.resize(max_degree_);
-  ycor_.resize(max_degree_);
-  dcor_.resize(max_degree_);
-  net_eo_.reserve(max_degree_);
+  int max_degree2 = 2 * max_degree_;
+  xcor_.resize(max_degree2);
+  ycor_.resize(max_degree2);
+  dcor_.resize(max_degree2);
+  net_eo_.reserve(max_degree2);
 
   int THRESH_M = 20;
   const int ENLARGE = 15;  // 5
@@ -793,7 +963,6 @@ NetRouteMap FastRouteCore::run()
   int L = 0;
   int VIA = 2;
   const int Ripvalue = -1;
-  int ripupTH3D = 10;
   const bool goingLV = true;
   const bool noADJ = false;
   const int thStep1 = 10;
@@ -807,8 +976,6 @@ NetRouteMap FastRouteCore::run()
   int max_adj;
 
   // call FLUTE to generate RSMT and break the nets into segments (2-pin nets)
-
-  const clock_t t1 = clock();
 
   via_cost_ = 0;
   gen_brk_RSMT(false, false, false, false, noADJ);
@@ -826,7 +993,6 @@ NetRouteMap FastRouteCore::run()
 
   int enlarge_ = 10;
   int newTH = 10;
-  int healingTrigger = 0;
   bool stopDEC = false;
   int upType = 1;
 
@@ -849,7 +1015,7 @@ NetRouteMap FastRouteCore::run()
                "LV routing round {}, enlarge {}.",
                i,
                enlarge_);
-    routeLVAll(newTH, enlarge_, LOGIS_COF);
+    routeMonotonicAll(newTH, enlarge_, LOGIS_COF);
 
     past_cong = getOverflow2Dmaze(&maxOverflow, &tUsage);
 
@@ -885,15 +1051,19 @@ NetRouteMap FastRouteCore::run()
   }
 
   // debug mode Rectilinear Steiner Tree before overflow iterations
-  if (debug_->isOn_ && debug_->rectilinearSTree_) {
-    for (int netID = 0; netID < num_valid_nets_; netID++) {
-      if (nets_[netID]->db_net == debug_->net_) {
+  if (debug_->isOn() && debug_->rectilinearSTree_) {
+    for (const int& netID : net_ids_) {
+      if (nets_[netID]->getDbNet() == debug_->net_) {
         StTreeVisualization(sttrees_[netID], nets_[netID], false);
       }
     }
   }
 
+  SaveLastRouteLen();
+
   const int max_overflow_increases = 25;
+
+  float slack_th = std::numeric_limits<float>::lowest();
 
   // set overflow_increases as -1 since the first iteration always sum 1
   int overflow_increases = -1;
@@ -987,7 +1157,8 @@ NetRouteMap FastRouteCore::run()
                   LOGIS_COF,
                   VIA,
                   slope,
-                  L);
+                  L,
+                  slack_th);
     int last_cong = past_cong;
     past_cong = getOverflow2Dmaze(&maxOverflow, &tUsage);
 
@@ -1009,17 +1180,6 @@ NetRouteMap FastRouteCore::run()
 
     if (maxOverflow < 150) {
       if (i == 20 && past_cong > 200) {
-        if (overflow_reduction_percent < 0.15) {
-          // if after 20 iterations the largest reduction percentage
-          // is smaller than 15%, stop congestion iterations and
-          // consider the design unroutable
-          if (verbose_)
-            logger_->warn(GRT,
-                          227,
-                          "Reached 20 congestion iterations with less than 15% "
-                          "of reduction between iterations.");
-          break;
-        }
         if (verbose_) {
           logger_->info(GRT, 103, "Extra Run for hard benchmark.");
         }
@@ -1037,7 +1197,8 @@ NetRouteMap FastRouteCore::run()
                       LOGIS_COF,
                       VIA,
                       slope,
-                      L);
+                      L,
+                      slack_th);
         last_cong = past_cong;
         past_cong = getOverflow2Dmaze(&maxOverflow, &tUsage);
 
@@ -1068,7 +1229,6 @@ NetRouteMap FastRouteCore::run()
 
     if (past_cong >= last_cong) {
       VIA = 0;
-      healingTrigger++;
     }
 
     if (past_cong < bmfl) {
@@ -1088,7 +1248,8 @@ NetRouteMap FastRouteCore::run()
                       LOGIS_COF,
                       VIA,
                       slope,
-                      L);
+                      L,
+                      slack_th);
         last_cong = past_cong;
         past_cong = getOverflow2Dmaze(&maxOverflow, &tUsage);
         if (past_cong < last_cong) {
@@ -1133,18 +1294,23 @@ NetRouteMap FastRouteCore::run()
     }
 
     last_total_overflow = total_overflow_;
+
+    // generate DRC report each interval
+    if (congestion_report_iter_step_ && i % congestion_report_iter_step_ == 0) {
+      saveCongestion(i);
+    }
   }  // end overflow iterations
 
   // Debug mode Tree 2D after overflow iterations
-  if (debug_->isOn_ && debug_->tree2D_) {
-    for (int netID = 0; netID < num_valid_nets_; netID++) {
-      if (nets_[netID]->db_net == debug_->net_) {
+  if (debug_->isOn() && debug_->tree2D_) {
+    for (const int& netID : net_ids_) {
+      if (nets_[netID]->getDbNet() == debug_->net_) {
         StTreeVisualization(sttrees_[netID], nets_[netID], false);
       }
     }
   }
 
-  bool has_2D_overflow = total_overflow_ > 0;
+  has_2D_overflow_ = total_overflow_ > 0;
 
   if (minofl > 0) {
     debugPrint(logger_,
@@ -1163,46 +1329,23 @@ NetRouteMap FastRouteCore::run()
           GRT,
           230,
           "Congestion iterations cannot increase overflow, reached the "
-          "maximum number of times the total overflow can bee increased.");
+          "maximum number of times the total overflow can be increased.");
   }
 
   freeRR();
 
-  checkUsage();
+  removeLoops();
 
   getOverflow2Dmaze(&maxOverflow, &tUsage);
 
-  newLA();
-
-  const clock_t t2 = clock();
-  const float gen_brk_Time = (float) (t2 - t1) / CLOCKS_PER_SEC;
+  layerAssignment();
 
   costheight_ = 3;
   via_cost_ = 1;
 
-  if (gen_brk_Time < 60) {
-    ripupTH3D = 15;
-  } else if (gen_brk_Time < 120) {
-    ripupTH3D = 18;
-  } else {
-    ripupTH3D = 20;
-  }
-
-  // Debug mode Tree 3D after layer assignament
-  if (debug_->isOn_ && debug_->tree3D_) {
-    for (int netID = 0; netID < num_valid_nets_; netID++) {
-      if (nets_[netID]->db_net == debug_->net_) {
-        StTreeVisualization(sttrees_[netID], nets_[netID], true);
-      }
-    }
-  }
-
   if (goingLV && past_cong == 0) {
-    mazeRouteMSMDOrder3D(enlarge_, 0, ripupTH3D, layer_orientation_);
-
-    if (gen_brk_Time > 120) {
-      mazeRouteMSMDOrder3D(enlarge_, 0, 12, layer_orientation_);
-    }
+    mazeRouteMSMDOrder3D(enlarge_, 0, 20);
+    mazeRouteMSMDOrder3D(enlarge_, 0, 12);
   }
 
   fillVIA();
@@ -1215,19 +1358,18 @@ NetRouteMap FastRouteCore::run()
     logger_->info(GRT, 112, "Final usage 3D: {}", (finallength + 3 * numVia));
   }
 
+  // Debug mode Tree 3D after layer assignament
+  if (debug_->isOn() && debug_->tree3D_) {
+    for (const int& netID : net_ids_) {
+      if (nets_[netID]->getDbNet() == debug_->net_) {
+        StTreeVisualization(sttrees_[netID], nets_[netID], true);
+      }
+    }
+  }
+
   NetRouteMap routes = getRoutes();
-
   net_eo_.clear();
-
-  if (has_2D_overflow && !allow_overflow_) {
-    logger_->error(GRT, 118, "Routing congestion too high.");
-  }
-
-  if (total_overflow_ > 0) {
-    if (verbose_)
-      logger_->warn(GRT, 115, "Global routing finished with overflow.");
-  }
-
+  net_ids_.clear();
   return routes;
 }
 
@@ -1236,22 +1378,65 @@ void FastRouteCore::setVerbose(bool v)
   verbose_ = v;
 }
 
+void FastRouteCore::setCriticalNetsPercentage(float u)
+{
+  critical_nets_percentage_ = u;
+}
+
+void FastRouteCore::setMakeWireParasiticsBuilder(
+    AbstractMakeWireParasitics* builder)
+{
+  parasitics_builder_ = builder;
+}
+
 void FastRouteCore::setOverflowIterations(int iterations)
 {
   overflow_iterations_ = iterations;
 }
 
-void FastRouteCore::setAllowOverflow(bool allow)
+void FastRouteCore::setCongestionReportIterStep(int congestion_report_iter_step)
 {
-  allow_overflow_ = allow;
+  congestion_report_iter_step_ = congestion_report_iter_step;
+}
+
+void FastRouteCore::setCongestionReportFile(const char* congestion_file_name)
+{
+  congestion_file_name_ = congestion_file_name;
+}
+
+void FastRouteCore::setGridMax(int x_max, int y_max)
+{
+  x_grid_max_ = x_max;
+  y_grid_max_ = y_max;
 }
 
 std::vector<int> FastRouteCore::getOriginalResources()
 {
   std::vector<int> original_resources(num_layers_);
   for (int l = 0; l < num_layers_; l++) {
-    original_resources[l]
-        += (v_capacity_3D_[l] + h_capacity_3D_[l]) * y_grid_ * x_grid_;
+    bool is_horizontal
+        = layer_directions_[l] == odb::dbTechLayerDir::HORIZONTAL;
+    if (is_horizontal) {
+      if (!regular_y_) {
+        original_resources[l] += (v_capacity_3D_[l] + h_capacity_3D_[l])
+                                 * (y_grid_) * (x_grid_ - 1);
+        original_resources[l] += (last_col_v_capacity_3D_[l] * y_grid_)
+                                 + (last_row_h_capacity_3D_[l] * x_grid_);
+      } else {
+        original_resources[l]
+            += (v_capacity_3D_[l] + h_capacity_3D_[l]) * (y_grid_) * (x_grid_);
+      }
+    } else {
+      if (!regular_x_) {
+        original_resources[l] += (v_capacity_3D_[l] + h_capacity_3D_[l])
+                                 * (y_grid_ - 1) * (x_grid_);
+        original_resources[l] += (last_col_v_capacity_3D_[l] * y_grid_)
+                                 + (last_row_h_capacity_3D_[l] * x_grid_);
+      } else {
+        original_resources[l]
+            += (v_capacity_3D_[l] + h_capacity_3D_[l]) * (y_grid_) * (x_grid_);
+      }
+    }
   }
 
   return original_resources;
@@ -1305,216 +1490,16 @@ void FastRouteCore::computeCongestionInformation()
 
 const char* getNetName(odb::dbNet* db_net);
 
-const char* netName(FrNet* net)
+const char* FrNet::getName() const
 {
-  return getNetName(net->db_net);
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////
-
-enum class TreeStructure
-{
-  steinerTreeByStt,
-  steinerTreeByFastroute
-};
-
-class FastRouteRenderer : public gui::Renderer
-{
- public:
-  FastRouteRenderer(odb::dbTech* tech,
-                    int w_tile,
-                    int h_tile,
-                    int x_corner,
-                    int y_corner);
-  void highlight(const FrNet* net);
-  void setSteinerTree(const stt::Tree& stree);
-  void setStTreeValues(const StTree& stree);
-  void setIs3DVisualization(bool is3DVisualization);
-  void setTreeStructure(TreeStructure treeStructure);
-
-  virtual void drawObjects(gui::Painter& /* painter */) override;
-
- private:
-  void drawTreeEdges(gui::Painter& painter);
-  void drawCircleObjects(gui::Painter& painter);
-  void drawLineObject(int x1,
-                      int y1,
-                      int l1,
-                      int x2,
-                      int y2,
-                      int l2,
-                      gui::Painter& painter);
-
-  TreeStructure treeStructure_;
-
-  // Steiner Tree by stt
-  stt::Tree stree_;
-
-  // Steiner tree by fastroute
-  std::vector<TreeEdge> treeEdges_;
-  bool is3DVisualization_;
-
-  // net data of pins
-  std::vector<int> pinX_;  // array of X coordinates of pins
-  std::vector<int> pinY_;  // array of Y coordinates of pins
-  std::vector<int> pinL_;  // array of L coordinates of pins
-  int num_pins_;
-
-  odb::dbTech* tech_;
-  int w_tile_, h_tile_, x_corner_, y_corner_;
-};
-
-FastRouteRenderer::FastRouteRenderer(odb::dbTech* tech,
-                                     int w_tile,
-                                     int h_tile,
-                                     int x_corner,
-                                     int y_corner)
-    : treeStructure_(TreeStructure::steinerTreeByStt),
-      is3DVisualization_(false),
-      num_pins_(0),
-      tech_(tech),
-      w_tile_(w_tile),
-      h_tile_(h_tile),
-      x_corner_(x_corner),
-      y_corner_(y_corner)
-{
-}
-void FastRouteRenderer::setTreeStructure(TreeStructure treeStructure)
-{
-  treeStructure_ = treeStructure;
-}
-void FastRouteRenderer::highlight(const FrNet* net)
-{
-  pinX_ = net->pinX;
-  pinY_ = net->pinY;
-  pinL_ = net->pinL;
-  num_pins_ = net->numPins;
-}
-void FastRouteRenderer::setSteinerTree(const stt::Tree& stree)
-{
-  stree_ = stree;
-}
-
-std::vector<TreeEdge> convertToVector(TreeEdge* treeedges, int deg)
-{
-  std::vector<TreeEdge> treeEdges;
-  for (int edgeID = 0; edgeID < 2 * deg - 3; edgeID++) {
-    treeEdges.push_back(treeedges[edgeID]);
-  }
-  return treeEdges;
-}
-
-void FastRouteRenderer::setStTreeValues(const StTree& stree)
-{
-  treeEdges_ = convertToVector(stree.edges, stree.deg);
-}
-void FastRouteRenderer::setIs3DVisualization(bool is3DVisualization)
-{
-  is3DVisualization_ = is3DVisualization;
-}
-
-void FastRouteRenderer::drawLineObject(int x1,
-                                       int y1,
-                                       int layer1,
-                                       int x2,
-                                       int y2,
-                                       int layer2,
-                                       gui::Painter& painter)
-{
-  if (layer1 == layer2) {
-    if (is3DVisualization_) {
-      odb::dbTechLayer* layer = tech_->findRoutingLayer(layer1);
-      painter.setPen(layer);
-      painter.setBrush(layer);
-    } else {
-      painter.setPen(painter.cyan);
-      painter.setBrush(painter.cyan);
-    }
-    painter.setPenWidth(700);
-    painter.drawLine(x1, y1, x2, y2);
-  }
-}
-void FastRouteRenderer::drawTreeEdges(gui::Painter& painter)
-{
-  int lastL = 0;
-  for (TreeEdge treeEdge : treeEdges_) {
-    if (treeEdge.len == 0) {
-      continue;
-    }
-
-    int routeLen = treeEdge.route.routelen;
-    const std::vector<short>& gridsX = treeEdge.route.gridsX;
-    const std::vector<short>& gridsY = treeEdge.route.gridsY;
-    const std::vector<short>& gridsL = treeEdge.route.gridsL;
-    int lastX = w_tile_ * (gridsX[0] + 0.5) + x_corner_;
-    int lastY = h_tile_ * (gridsY[0] + 0.5) + y_corner_;
-
-    if (is3DVisualization_)
-      lastL = gridsL[0];
-
-    for (int i = 1; i <= routeLen; i++) {
-      const int xreal = w_tile_ * (gridsX[i] + 0.5) + x_corner_;
-      const int yreal = h_tile_ * (gridsY[i] + 0.5) + y_corner_;
-
-      if (is3DVisualization_) {
-        drawLineObject(
-            lastX, lastY, lastL + 1, xreal, yreal, gridsL[i] + 1, painter);
-        lastL = gridsL[i];
-      } else {
-        drawLineObject(
-            lastX, lastY, -1, xreal, yreal, -1, painter);  // -1 to 2D Trees
-      }
-      lastX = xreal;
-      lastY = yreal;
-    }
-  }
-}
-void FastRouteRenderer::drawCircleObjects(gui::Painter& painter)
-{
-  painter.setPenWidth(700);
-  for (int i = 0; i < num_pins_; i++) {
-    const int xreal = w_tile_ * (pinX_[i] + 0.5) + x_corner_;
-    const int yreal = h_tile_ * (pinY_[i] + 0.5) + y_corner_;
-
-    odb::dbTechLayer* layer = tech_->findRoutingLayer(pinL_[i] + 1);
-    painter.setPen(layer);
-    painter.setBrush(layer);
-    painter.drawCircle(xreal, yreal, 1500);
-  }
-}
-
-void FastRouteRenderer::drawObjects(gui::Painter& painter)
-{
-  if (treeStructure_ == TreeStructure::steinerTreeByStt) {
-    painter.setPen(painter.white);
-    painter.setBrush(painter.white);
-    painter.setPenWidth(700);
-
-    const int deg = stree_.deg;
-    for (int i = 0; i < 2 * deg - 2; i++) {
-      const int x1 = w_tile_ * (stree_.branch[i].x + 0.5) + x_corner_;
-      const int y1 = h_tile_ * (stree_.branch[i].y + 0.5) + y_corner_;
-      const int n = stree_.branch[i].n;
-      const int x2 = w_tile_ * (stree_.branch[n].x + 0.5) + x_corner_;
-      const int y2 = h_tile_ * (stree_.branch[n].y + 0.5) + y_corner_;
-      const int len = abs(x1 - x2) + abs(y1 - y2);
-      if (len > 0) {
-        painter.drawLine(x1, y1, x2, y2);
-      }
-    }
-
-    drawCircleObjects(painter);
-  } else if (treeStructure_ == TreeStructure::steinerTreeByFastroute) {
-    drawTreeEdges(painter);
-
-    drawCircleObjects(painter);
-  }
+  return getNetName(getDbNet());
 }
 
 ////////////////////////////////////////////////////////////////
-void FastRouteCore::setDebugOn(bool isOn)
+void FastRouteCore::setDebugOn(
+    std::unique_ptr<AbstractFastRouteRenderer> renderer)
 {
-  debug_->isOn_ = isOn;
+  debug_->renderer_ = std::move(renderer);
 }
 void FastRouteCore::setDebugSteinerTree(bool steinerTree)
 {
@@ -1536,44 +1521,88 @@ void FastRouteCore::setDebugRectilinearSTree(bool rectiliniarSTree)
 {
   debug_->rectilinearSTree_ = rectiliniarSTree;
 }
+void FastRouteCore::setSttInputFilename(const char* file_name)
+{
+  debug_->sttInputFileName_ = std::string(file_name);
+}
+bool FastRouteCore::hasSaveSttInput()
+{
+  return (debug_->sttInputFileName_ != "");
+}
+std::string FastRouteCore::getSttInputFileName()
+{
+  return debug_->sttInputFileName_;
+}
+const odb::dbNet* FastRouteCore::getDebugNet()
+{
+  return debug_->net_;
+}
 
 void FastRouteCore::steinerTreeVisualization(const stt::Tree& stree, FrNet* net)
 {
-  // init FastRouteRender
-  if (gui::Gui::enabled()) {
-    if (fastrouteRender_ == nullptr) {
-      fastrouteRender_ = new FastRouteRenderer(
-          db_->getTech(), w_tile_, h_tile_, x_corner_, y_corner_);
-      gui_->registerRenderer(fastrouteRender_);
-    }
-    fastrouteRender_->highlight(net);
-    fastrouteRender_->setIs3DVisualization(
-        false);  // isnt 3D because is steiner tree generated by stt
-    fastrouteRender_->setSteinerTree(stree);
-    fastrouteRender_->setTreeStructure(TreeStructure::steinerTreeByStt);
-    gui_->redraw();
-    gui_->pause();
+  if (!debug_->isOn()) {
+    return;
   }
+  fastrouteRender()->highlight(net);
+  fastrouteRender()->setIs3DVisualization(
+      false);  //()isnt 3D because is steiner tree generated by stt
+  fastrouteRender()->setSteinerTree(stree);
+  fastrouteRender()->setTreeStructure(TreeStructure::steinerTreeByStt);
+  fastrouteRender()->redrawAndPause();
 }
 
 void FastRouteCore::StTreeVisualization(const StTree& stree,
                                         FrNet* net,
                                         bool is3DVisualization)
 {
-  // init FastRouteRender
-  if (gui_) {
-    if (fastrouteRender_ == nullptr) {
-      fastrouteRender_ = new FastRouteRenderer(
-          db_->getTech(), w_tile_, h_tile_, x_corner_, y_corner_);
-      gui_->registerRenderer(fastrouteRender_);
-    }
-    fastrouteRender_->highlight(net);
-    fastrouteRender_->setIs3DVisualization(is3DVisualization);
-    fastrouteRender_->setStTreeValues(stree);
-    fastrouteRender_->setTreeStructure(TreeStructure::steinerTreeByFastroute);
-    gui_->redraw();
-    gui_->pause();
+  if (!debug_->isOn()) {
+    return;
   }
+  fastrouteRender()->highlight(net);
+  fastrouteRender()->setIs3DVisualization(is3DVisualization);
+  fastrouteRender()->setStTreeValues(stree);
+  fastrouteRender()->setTreeStructure(TreeStructure::steinerTreeByFastroute);
+  fastrouteRender()->redrawAndPause();
+}
+
+////////////////////////////////////////////////////////////////
+
+int FrNet::getLayerEdgeCost(int layer) const
+{
+  if (edge_cost_per_layer_)
+    return (*edge_cost_per_layer_)[layer];
+  else
+    return 1;
+}
+
+void FrNet::addPin(int x, int y, int layer)
+{
+  pin_x_.push_back(x);
+  pin_y_.push_back(y);
+  pin_l_.push_back(layer);
+}
+
+void FrNet::reset(odb::dbNet* db_net,
+                  bool is_clock,
+                  int driver_idx,
+                  int edge_cost,
+                  int min_layer,
+                  int max_layer,
+                  float slack,
+                  std::vector<int>* edge_cost_per_layer)
+{
+  db_net_ = db_net;
+  is_critical_ = false;
+  is_clock_ = is_clock;
+  driver_idx_ = driver_idx;
+  edge_cost_ = edge_cost;
+  min_layer_ = min_layer;
+  max_layer_ = max_layer;
+  slack_ = slack;
+  edge_cost_per_layer_.reset(edge_cost_per_layer);
+  pin_x_.clear();
+  pin_y_.clear();
+  pin_l_.clear();
 }
 
 }  // namespace grt

@@ -26,9 +26,9 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FLEX_GRID_GRAPH_H
-#define _FLEX_GRID_GRAPH_H
+#pragma once
 
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -39,64 +39,22 @@
 #include "frBaseTypes.h"
 #include "frDesign.h"
 
-namespace fr {
+namespace drt {
+
 class FlexDRWorker;
 class FlexDRGraphics;
 class FlexGridGraph
 {
  public:
   // constructors
-  FlexGridGraph()  // just for serialization
-  {
-  }
-
-  FlexGridGraph(frTechObject* techIn, FlexDRWorker* workerIn)
-      : tech_(techIn),
-        drWorker_(workerIn),
-        graphics_(nullptr),
-        xCoords_(),
-        yCoords_(),
-        zCoords_(),
-        zHeights_(),
-        ggDRCCost_(0),
-        ggMarkerCost_(0),
-        halfViaEncArea_(nullptr),
-        via2viaMinLen_(nullptr),
-        via2viaMinLenNew_(nullptr),
-        via2turnMinLen_(nullptr),
-        ndr_(nullptr),
-        dstTaperBox(nullptr)
+  FlexGridGraph(frTechObject* techIn, Logger* loggerIn, FlexDRWorker* workerIn)
+      : tech_(techIn), logger_(loggerIn), drWorker_(workerIn)
   {
   }
   // getters
   frTechObject* getTech() const { return tech_; }
   FlexDRWorker* getDRWorker() const { return drWorker_; }
 
-  // unsafe access, no check
-  frDirEnum getPrevAstarNodeDir(const FlexMazeIdx& idx) const
-  {
-    auto baseIdx = 3 * getIdx(idx.x(), idx.y(), idx.z());
-    return (frDirEnum)(((unsigned short) (prevDirs_[baseIdx]) << 2)
-                       + ((unsigned short) (prevDirs_[baseIdx + 1]) << 1)
-                       + ((unsigned short) (prevDirs_[baseIdx + 2]) << 0));
-  }
-  // unsafe access, no check
-  bool isSrc(frMIdx x, frMIdx y, frMIdx z) const
-  {
-    return srcs_[getIdx(x, y, z)];
-  }
-  // unsafe access, no check
-  bool isDst(frMIdx x, frMIdx y, frMIdx z) const
-  {
-    return dsts_[getIdx(x, y, z)];
-  }
-  bool isDst(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
-  {
-    getNextGrid(x, y, z, dir);
-    bool b = dsts_[getIdx(x, y, z)];
-    getPrevGrid(x, y, z, dir);
-    return b;
-  }
   // unsafe access, no check
   bool isBlocked(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
   {
@@ -140,7 +98,7 @@ class FlexGridGraph
 
   void getBBox(Rect& in) const
   {
-    if (xCoords_.size() && yCoords_.size()) {
+    if (!xCoords_.empty() && !yCoords_.empty()) {
       in.init(
           xCoords_.front(), yCoords_.front(), xCoords_.back(), yCoords_.back());
     }
@@ -154,7 +112,7 @@ class FlexGridGraph
   // unsafe access
   Point& getPoint(Point& in, frMIdx x, frMIdx y) const
   {
-    in.set(xCoords_[x], yCoords_[y]);
+    in = {xCoords_[x], yCoords_[y]};
     return in;
   }
   // unsafe access
@@ -223,34 +181,32 @@ class FlexGridGraph
               mIdx1.z());
     if (enclosureOption == 1) {
       if (xCoords_[mIdx1.x()] > box.xMin()) {
-        mIdx1.setX(max(0, mIdx1.x() - 1));
+        mIdx1.setX(std::max(0, mIdx1.x() - 1));
       }
       if (yCoords_[mIdx1.y()] > box.yMin()) {
-        mIdx1.setY(max(0, mIdx1.y() - 1));
+        mIdx1.setY(std::max(0, mIdx1.y() - 1));
       }
     }
+    const int ux
+        = std::upper_bound(xCoords_.begin(), xCoords_.end(), box.xMax())
+          - xCoords_.begin();
+    const int uy
+        = std::upper_bound(yCoords_.begin(), yCoords_.end(), box.yMax())
+          - yCoords_.begin();
     mIdx2.set(
-        frMIdx(std::upper_bound(xCoords_.begin(), xCoords_.end(), box.xMax())
-               - xCoords_.begin())
-            - 1,
-        frMIdx(std::upper_bound(yCoords_.begin(), yCoords_.end(), box.yMax())
-               - yCoords_.begin())
-            - 1,
-        mIdx2.z());
+        frMIdx(std::max(0, ux - 1)), frMIdx(std::max(0, uy - 1)), mIdx2.z());
     if (enclosureOption == 2) {
       if (xCoords_[mIdx2.x()] > box.xMax()) {
-        mIdx2.setX(max(0, mIdx2.x() - 1));
+        mIdx2.setX(std::max(0, mIdx2.x() - 1));
       }
       if (yCoords_[mIdx2.y()] > box.yMax()) {
-        mIdx2.setY(max(0, mIdx2.y() - 1));
+        mIdx2.setY(std::max(0, mIdx2.y() - 1));
       }
     }
   }
   frCoord getZHeight(frMIdx in) const { return zHeights_[in]; }
-  dbTechLayerDir getZDir(frMIdx in) const
-  {
-    return layerRouteDirections_[in];
-  }
+  dbTechLayerDir getZDir(frMIdx in) const { return layerRouteDirections_[in]; }
+  int getLayerCount() { return zCoords_.size(); }
   bool hasEdge(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
   {
     correct(x, y, z, dir);
@@ -286,13 +242,20 @@ class FlexGridGraph
     }
     return sol;
   }
-  //gets fixed shape cost in the adjacent node following dir
-  frUInt4 getFixedShapeCostAdj(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
+  // gets fixed shape cost in the adjacent node following dir
+  frUInt4 getFixedShapeCostAdj(frMIdx x,
+                               frMIdx y,
+                               frMIdx z,
+                               frDirEnum dir) const
   {
     frUInt4 sol = 0;
     if (dir != frDirEnum::D && dir != frDirEnum::U) {
       reverse(x, y, z, dir);
-      sol = nodes_[getIdx(x, y, z)].fixedShapeCostPlanar;
+      if (dir == frDirEnum::W || dir == frDirEnum::E) {
+        sol = nodes_[getIdx(x, y, z)].fixedShapeCostPlanarHorz;
+      } else {
+        sol = nodes_[getIdx(x, y, z)].fixedShapeCostPlanarVert;
+      }
     } else {
       correctU(x, y, z, dir);
       const Node& node = nodes_[getIdx(x, y, z)];
@@ -308,14 +271,16 @@ class FlexGridGraph
   {
     if (dir != frDirEnum::D && dir != frDirEnum::U) {
       return false;
-    } else {
-      correctU(x, y, z, dir);
-      auto idx = getIdx(x, y, z);
-      return nodes_[idx].overrideShapeCostVia;
     }
+    correctU(x, y, z, dir);
+    auto idx = getIdx(x, y, z);
+    return nodes_[idx].overrideShapeCostVia;
   }
-  //gets route shape cost in the adjacent node following dir
-  frUInt4 getRouteShapeCostAdj(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
+  // gets route shape cost in the adjacent node following dir
+  frUInt4 getRouteShapeCostAdj(frMIdx x,
+                               frMIdx y,
+                               frMIdx z,
+                               frDirEnum dir) const
   {
     frUInt4 sol = 0;
     if (dir != frDirEnum::D && dir != frDirEnum::U) {
@@ -333,7 +298,7 @@ class FlexGridGraph
   {
     return getRouteShapeCostAdj(x, y, z, dir);
   }
-  //gets marker cost in the adjacent node following dir
+  // gets marker cost in the adjacent node following dir
   frUInt4 getMarkerCostAdj(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
   {
     frUInt4 sol = 0;
@@ -400,6 +365,9 @@ class FlexGridGraph
     return sol;
   }
   // setters
+  void setTech(frTechObject* techIn) { tech_ = techIn; }
+  void setLogger(Logger* loggerIn) { logger_ = loggerIn; }
+  void setWorker(FlexDRWorker* workerIn) { drWorker_ = workerIn; }
   bool addEdge(frMIdx x,
                frMIdx y,
                frMIdx z,
@@ -430,7 +398,7 @@ class FlexGridGraph
           default:;
         }
       } else {
-        // cout <<"not valid edge";
+        // std::cout <<"not valid edge";
       }
     }
     return sol;
@@ -625,14 +593,24 @@ class FlexGridGraph
   {
     if (isValid(x, y, z)) {
       auto& node = nodes_[getIdx(x, y, z)];
-      node.fixedShapeCostPlanar = addToByte(node.fixedShapeCostPlanar, 1);
+      node.fixedShapeCostPlanarHorz
+          = addToByte(node.fixedShapeCostPlanarHorz, 1);
+      node.fixedShapeCostPlanarVert
+          = addToByte(node.fixedShapeCostPlanarVert, 1);
     }
   }
-  void setFixedShapeCostPlanar(frMIdx x, frMIdx y, frMIdx z, fr::frUInt4 c)
+  void setFixedShapeCostPlanarVert(frMIdx x, frMIdx y, frMIdx z, frUInt4 c)
   {
     if (isValid(x, y, z)) {
       auto& node = nodes_[getIdx(x, y, z)];
-      node.fixedShapeCostPlanar = c;
+      node.fixedShapeCostPlanarVert = c;
+    }
+  }
+  void setFixedShapeCostPlanarHorz(frMIdx x, frMIdx y, frMIdx z, frUInt4 c)
+  {
+    if (isValid(x, y, z)) {
+      auto& node = nodes_[getIdx(x, y, z)];
+      node.fixedShapeCostPlanarHorz = c;
     }
   }
   void addFixedShapeCostVia(frMIdx x, frMIdx y, frMIdx z)
@@ -642,7 +620,7 @@ class FlexGridGraph
       node.fixedShapeCostVia = addToByte(node.fixedShapeCostVia, 1);
     }
   }
-  void setFixedShapeCostVia(frMIdx x, frMIdx y, frMIdx z, fr::frUInt4 c)
+  void setFixedShapeCostVia(frMIdx x, frMIdx y, frMIdx z, frUInt4 c)
   {
     if (isValid(x, y, z)) {
       auto& node = nodes_[getIdx(x, y, z)];
@@ -653,7 +631,10 @@ class FlexGridGraph
   {
     if (isValid(x, y, z)) {
       auto& node = nodes_[getIdx(x, y, z)];
-      node.fixedShapeCostPlanar = subFromByte(node.fixedShapeCostPlanar, 1);
+      node.fixedShapeCostPlanarHorz
+          = subFromByte(node.fixedShapeCostPlanarHorz, 1);
+      node.fixedShapeCostPlanarVert
+          = subFromByte(node.fixedShapeCostPlanarVert, 1);
     }
   }
   void subFixedShapeCostVia(frMIdx x, frMIdx y, frMIdx z)
@@ -665,24 +646,16 @@ class FlexGridGraph
   }
 
   // unsafe access, no idx check
-  void setPrevAstarNodeDir(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir)
-  {
-    auto baseIdx = 3 * getIdx(x, y, z);
-    prevDirs_[baseIdx] = ((unsigned short) dir >> 2) & 1;
-    prevDirs_[baseIdx + 1] = ((unsigned short) dir >> 1) & 1;
-    prevDirs_[baseIdx + 2] = ((unsigned short) dir) & 1;
-  }
-  // unsafe access, no idx check
-  void setSrc(frMIdx x, frMIdx y, frMIdx z) { srcs_[getIdx(x, y, z)] = 1; }
+  void setSrc(frMIdx x, frMIdx y, frMIdx z) { srcs_[getIdx(x, y, z)] = true; }
   void setSrc(const FlexMazeIdx& mi)
   {
-    srcs_[getIdx(mi.x(), mi.y(), mi.z())] = 1;
+    srcs_[getIdx(mi.x(), mi.y(), mi.z())] = true;
   }
   // unsafe access, no idx check
-  void setDst(frMIdx x, frMIdx y, frMIdx z) { dsts_[getIdx(x, y, z)] = 1; }
+  void setDst(frMIdx x, frMIdx y, frMIdx z) { dsts_[getIdx(x, y, z)] = true; }
   void setDst(const FlexMazeIdx& mi)
   {
-    dsts_[getIdx(mi.x(), mi.y(), mi.z())] = 1;
+    dsts_[getIdx(mi.x(), mi.y(), mi.z())] = true;
   }
   // unsafe access
   void setSVia(frMIdx x, frMIdx y, frMIdx z)
@@ -729,16 +702,22 @@ class FlexGridGraph
     nodes_[getIdx(x, y, z)].hasGridCostUp = true;
   }
   // unsafe access, no idx check
-  void resetSrc(frMIdx x, frMIdx y, frMIdx z) { srcs_[getIdx(x, y, z)] = 0; }
+  void resetSrc(frMIdx x, frMIdx y, frMIdx z)
+  {
+    srcs_[getIdx(x, y, z)] = false;
+  }
   void resetSrc(const FlexMazeIdx& mi)
   {
-    srcs_[getIdx(mi.x(), mi.y(), mi.z())] = 0;
+    srcs_[getIdx(mi.x(), mi.y(), mi.z())] = false;
   }
   // unsafe access, no idx check
-  void resetDst(frMIdx x, frMIdx y, frMIdx z) { dsts_[getIdx(x, y, z)] = 0; }
+  void resetDst(frMIdx x, frMIdx y, frMIdx z)
+  {
+    dsts_[getIdx(x, y, z)] = false;
+  }
   void resetDst(const FlexMazeIdx& mi)
   {
-    dsts_[getIdx(mi.x(), mi.y(), mi.z())] = 0;
+    dsts_[getIdx(mi.x(), mi.y(), mi.z())] = false;
   }
   void resetGridCost(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir)
   {
@@ -772,7 +751,7 @@ class FlexGridGraph
     if (x2 < x1 || y2 < y1) {
       return;
     }
-    switch(getZDir(z)) {
+    switch (getZDir(z)) {
       case dbTechLayerDir::HORIZONTAL:
         for (int i = y1; i <= y2; i++) {
           auto idx1 = getIdx(x1, i, z);
@@ -788,7 +767,7 @@ class FlexGridGraph
         }
         break;
       case dbTechLayerDir::NONE:
-        cout << "Error: Invalid preferred direction on layer " << z << ".";
+        std::cout << "Error: Invalid preferred direction on layer " << z << ".";
         break;
     }
   }
@@ -797,7 +776,7 @@ class FlexGridGraph
     if (x2 < x1 || y2 < y1) {
       return;
     }
-    switch(getZDir(z)) {
+    switch (getZDir(z)) {
       case dbTechLayerDir::HORIZONTAL:
         for (int i = y1; i <= y2; i++) {
           auto idx1 = getIdx(x1, i, z);
@@ -813,7 +792,7 @@ class FlexGridGraph
         }
         break;
       case dbTechLayerDir::NONE:
-        cout << "Error: Invalid preferred direction on layer " << z << ".";
+        std::cout << "Error: Invalid preferred direction on layer " << z << ".";
         break;
     }
   }
@@ -835,10 +814,6 @@ class FlexGridGraph
                          frDirEnum dir,
                          frDirEnum prevDir,
                          frLayer* layer) const;
-  frCoord getMinSpacingValue(frLayer* layer,
-                             frCoord width1,
-                             frCoord width2,
-                             frCoord prl) const;
   frCost getCosts(frMIdx gridX,
                   frMIdx gridY,
                   frMIdx gridZ,
@@ -868,39 +843,18 @@ class FlexGridGraph
               FlexMazeIdx& ccMazeIdx2,
               const Point& centerPt,
               std::map<FlexMazeIdx, frBox3D*>& mazeIdx2TaperBox);
-  void setCost(frUInt4 drcCostIn, frUInt4 markerCostIn)
+  void setCost(frUInt4 drcCostIn,
+               frUInt4 markerCostIn,
+               frUInt4 FixedShapeCostIn)
   {
     ggDRCCost_ = drcCostIn;
     ggMarkerCost_ = markerCostIn;
+    ggFixedShapeCost_ = FixedShapeCostIn;
   }
   frCoord getHalfViaEncArea(frMIdx z, bool isLayer1) const
   {
     return (isLayer1 ? (*halfViaEncArea_)[z].first
                      : (*halfViaEncArea_)[z].second);
-  }
-  bool allowVia2ViaZeroLen(frMIdx z, bool isPrevViaUp, bool isCurrViaUp) const
-  {
-    return ((*via2viaMinLen_)[z].second)[((unsigned) isPrevViaUp << 1)
-                                         + (unsigned) isCurrViaUp];
-  }
-  frCoord getVia2ViaMinLen(frMIdx z, bool isPrevViaUp, bool isCurrViaUp) const
-  {
-    return ((*via2viaMinLen_)[z]
-                .first)[((unsigned) isPrevViaUp << 1) + (unsigned) isCurrViaUp];
-  }
-  frCoord getVia2ViaMinLenNew(frMIdx z,
-                              bool isPrevViaUp,
-                              bool isCurrViaUp,
-                              bool isCurrDirY) const
-  {
-    return (*via2viaMinLenNew_)[z][((unsigned) isPrevViaUp << 2)
-                                   + ((unsigned) isCurrViaUp << 1)
-                                   + (unsigned) isCurrDirY];
-  }
-  frCoord getVia2TurnMinLen(frMIdx z, bool isPrevViaUp, bool isCurrDirY) const
-  {
-    return (*via2turnMinLen_)[z][((unsigned) isPrevViaUp << 1)
-                                 + (unsigned) isCurrDirY];
   }
   int nTracksX() { return xCoords_.size(); }
   int nTracksY() { return yCoords_.size(); }
@@ -928,33 +882,44 @@ class FlexGridGraph
     wavefront_.fit();
   }
 
-  void printNode(frMIdx x, frMIdx y, frMIdx z) {
-      Node& n = nodes_[getIdx(x, y, z)];
-      cout << "\nNode ( " << x << " " << y << " " << z << " ) (idx) / " << 
-                " ( " << xCoords_[x] << " " << yCoords_[y] << " ) (coords)\n";
-      cout << "hasEastEdge " << n.hasEastEdge << "\n";
-      cout << "hasNorthEdge " << n.hasNorthEdge << "\n";
-      cout << "hasUpEdge " << n.hasUpEdge << "\n";
-      cout << "isBlockedEast " << n.isBlockedEast << "\n";
-      cout << "isBlockedNorth " << n.isBlockedNorth << "\n";
-      cout << "isBlockedUp " << n.isBlockedUp << "\n";
-      cout << "hasSpecialVia " << n.hasSpecialVia << "\n";
-      cout << "overrideShapeCostVia " << n.overrideShapeCostVia << "\n";
-      cout << "hasGridCostEast " << n.hasGridCostEast << "\n";
-      cout << "hasGridCostNorth " << n.hasGridCostNorth << "\n";
-      cout << "hasGridCostUp " << n.hasGridCostUp << "\n";
-      cout << "routeShapeCostPlanar " << n.routeShapeCostPlanar << "\n";
-      cout << "routeShapeCostVia " << n.routeShapeCostVia << "\n";
-      cout << "markerCostPlanar " << n.markerCostPlanar << "\n";
-      cout << "markerCostVia " << n.markerCostVia << "\n";
-      cout << "fixedShapeCostVia " << n.fixedShapeCostVia << "\n";
-      cout << "fixedShapeCostPlanar " << n.fixedShapeCostPlanar << "\n";
+  void printNode(frMIdx x, frMIdx y, frMIdx z)
+  {
+    Node& n = nodes_[getIdx(x, y, z)];
+    std::cout << "\nNode ( " << x << " " << y << " " << z << " ) (idx) / "
+              << " ( " << xCoords_[x] << " " << yCoords_[y] << " ) (coords)\n";
+    std::cout << "hasEastEdge " << n.hasEastEdge << "\n";
+    std::cout << "hasNorthEdge " << n.hasNorthEdge << "\n";
+    std::cout << "hasUpEdge " << n.hasUpEdge << "\n";
+    std::cout << "isBlockedEast " << n.isBlockedEast << "\n";
+    std::cout << "isBlockedNorth " << n.isBlockedNorth << "\n";
+    std::cout << "isBlockedUp " << n.isBlockedUp << "\n";
+    std::cout << "hasSpecialVia " << n.hasSpecialVia << "\n";
+    std::cout << "overrideShapeCostVia " << n.overrideShapeCostVia << "\n";
+    std::cout << "hasGridCostEast " << n.hasGridCostEast << "\n";
+    std::cout << "hasGridCostNorth " << n.hasGridCostNorth << "\n";
+    std::cout << "hasGridCostUp " << n.hasGridCostUp << "\n";
+    std::cout << "routeShapeCostPlanar " << n.routeShapeCostPlanar << "\n";
+    std::cout << "routeShapeCostVia " << n.routeShapeCostVia << "\n";
+    std::cout << "markerCostPlanar " << n.markerCostPlanar << "\n";
+    std::cout << "markerCostVia " << n.markerCostVia << "\n";
+    std::cout << "fixedShapeCostVia " << n.fixedShapeCostVia << "\n";
+    std::cout << "fixedShapeCostPlanarHorz " << n.fixedShapeCostPlanarHorz
+              << "\n";
+    std::cout << "fixedShapeCostPlanarVert " << n.fixedShapeCostPlanarVert
+              << "\n";
   }
-  
+
  private:
-  frTechObject* tech_;
-  FlexDRWorker* drWorker_;
+  frTechObject* tech_ = nullptr;
+  Logger* logger_ = nullptr;
+  FlexDRWorker* drWorker_ = nullptr;
   FlexDRGraphics* graphics_;  // owned by FlexDR
+                              //
+#ifdef DEBUG_DRT_UNDERFLOW
+  static constexpr int cost_bits = 16;
+#else
+  static constexpr int cost_bits = 8;
+#endif
 
   struct Node
   {
@@ -978,27 +943,23 @@ class FlexGridGraph
     frUInt4 unused4 : 1;
     frUInt4 unused5 : 1;
     // Byte 2
-    frUInt4 routeShapeCostPlanar : 8;
+    frUInt4 routeShapeCostPlanar : cost_bits;
     // Byte 3
-    frUInt4 routeShapeCostVia : 8;
+    frUInt4 routeShapeCostVia : cost_bits;
     // Byte4
-    frUInt4 markerCostPlanar : 8;
+    frUInt4 markerCostPlanar : cost_bits;
     // Byte5
-    frUInt4 markerCostVia : 8;
+    frUInt4 markerCostVia : cost_bits;
     // Byte6
-    frUInt4 fixedShapeCostVia : 8;
+    frUInt4 fixedShapeCostVia : cost_bits;
     // Byte7
-    frUInt4 fixedShapeCostPlanar : 8;
-
-    template <class Archive>
-    void serialize(Archive& ar, const unsigned int version)
-    {
-      uint64_t* val = reinterpret_cast<uint64_t*>(this);
-      (ar) & *val;
-    }
-    friend class boost::serialization::access;
+    frUInt4 fixedShapeCostPlanarHorz : cost_bits;
+    // Byte8
+    frUInt4 fixedShapeCostPlanarVert : cost_bits;
   };
-  static_assert(sizeof(Node) == 8);
+#ifndef DEBUG_DRT_UNDERFLOW
+  static_assert(sizeof(Node) == 12);
+#endif
   frVector<Node> nodes_;
   std::vector<bool> prevDirs_;
   std::vector<bool> srcs_;
@@ -1010,24 +971,55 @@ class FlexGridGraph
   frVector<frCoord> zHeights_;  // accumulated Z diff
   std::vector<dbTechLayerDir> layerRouteDirections_;
   Rect dieBox_;
-  frUInt4 ggDRCCost_;
-  frUInt4 ggMarkerCost_;
+  frUInt4 ggDRCCost_ = 0;
+  frUInt4 ggMarkerCost_ = 0;
+  frUInt4 ggFixedShapeCost_;
   // temporary variables
   FlexWavefront wavefront_;
-  const std::vector<std::pair<frCoord, frCoord>>*
-      halfViaEncArea_;  // std::pair<layer1area, layer2area>
-  // via2viaMinLen[z][0], last via is down, curr via is down
-  // via2viaMinLen[z][1], last via is down, curr via is up
-  // via2viaMinLen[z][2], last via is up, curr via is down
-  // via2viaMinLen[z][3], last via is up, curr via is up
-  const std::vector<std::pair<std::vector<frCoord>, std::vector<bool>>>*
-      via2viaMinLen_;
-  const std::vector<std::vector<frCoord>>* via2viaMinLenNew_;
-  const std::vector<std::vector<frCoord>>* via2turnMinLen_;
+  const std::vector<std::pair<frCoord, frCoord>>* halfViaEncArea_
+      = nullptr;  // std::pair<layer1area, layer2area>
   // ndr related
-  frNonDefaultRule* ndr_;
-  const frBox3D*
-      dstTaperBox;  // taper box for the current dest pin in the search
+  frNonDefaultRule* ndr_ = nullptr;
+  const frBox3D* dstTaperBox
+      = nullptr;  // taper box for the current dest pin in the search
+
+  FlexGridGraph() = default;
+
+  // unsafe access, no idx check
+  void setPrevAstarNodeDir(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir)
+  {
+    auto baseIdx = 3 * getIdx(x, y, z);
+    prevDirs_[baseIdx] = ((uint16_t) dir >> 2) & 1;
+    prevDirs_[baseIdx + 1] = ((uint16_t) dir >> 1) & 1;
+    prevDirs_[baseIdx + 2] = ((uint16_t) dir) & 1;
+  }
+
+  // unsafe access, no check
+  frDirEnum getPrevAstarNodeDir(const FlexMazeIdx& idx) const
+  {
+    auto baseIdx = 3 * getIdx(idx.x(), idx.y(), idx.z());
+    return (frDirEnum) (((uint16_t) (prevDirs_[baseIdx]) << 2)
+                        + ((uint16_t) (prevDirs_[baseIdx + 1]) << 1)
+                        + ((uint16_t) (prevDirs_[baseIdx + 2]) << 0));
+  }
+
+  // unsafe access, no check
+  bool isSrc(frMIdx x, frMIdx y, frMIdx z) const
+  {
+    return srcs_[getIdx(x, y, z)];
+  }
+  // unsafe access, no check
+  bool isDst(frMIdx x, frMIdx y, frMIdx z) const
+  {
+    return dsts_[getIdx(x, y, z)];
+  }
+  bool isDst(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
+  {
+    getNextGrid(x, y, z, dir);
+    bool b = dsts_[getIdx(x, y, z)];
+    getPrevGrid(x, y, z, dir);
+    return b;
+  }
 
   // internal getters
   frMIdx getIdx(frMIdx xIdx, frMIdx yIdx, frMIdx zIdx) const
@@ -1036,8 +1028,8 @@ class FlexGridGraph
     auto ySize = yCoords_.size();
 
     frMIdx zDirModifier = (getZDir(zIdx) == dbTechLayerDir::HORIZONTAL)
-                        ? (xIdx + yIdx * xSize)
-                        : (yIdx + xIdx * ySize);
+                              ? (xIdx + yIdx * xSize)
+                              : (yIdx + xIdx * ySize);
     frMIdx partialCoordinates = zIdx * xSize * ySize;
 
     return zDirModifier + partialCoordinates;
@@ -1045,13 +1037,26 @@ class FlexGridGraph
 
   frUInt4 addToByte(frUInt4 augend, frUInt4 summand)
   {
-    constexpr frUInt4 limit = (1u << 8) - 1;
-    return std::min(augend + summand, limit);
+    frUInt4 result = augend + summand;
+    constexpr frUInt4 limit = (1u << cost_bits) - 1;
+#ifdef DEBUG_DRT_UNDERFLOW
+    if (result > limit) {
+      logger_->error(utl::DRT, 550, "addToByte overflow");
+    }
+#else
+    result = std::min(result, limit);
+#endif
+    return result;
   }
 
   frUInt4 subFromByte(frUInt4 minuend, frUInt4 subtrahend)
   {
-    return std::max(minuend - subtrahend, 0u);
+#ifdef DEBUG_DRT_UNDERFLOW
+    if (subtrahend > minuend) {
+      logger_->error(utl::DRT, 551, "subFromByte underflow");
+    }
+#endif
+    return std::max((int) (minuend - subtrahend), 0);
   }
 
   // internal utility
@@ -1072,7 +1077,6 @@ class FlexGridGraph
         break;
       default:;
     }
-    return;
   }
   void correctU(frMIdx& x, frMIdx& y, frMIdx& z, frDirEnum& dir) const
   {
@@ -1083,7 +1087,6 @@ class FlexGridGraph
         break;
       default:;
     }
-    return;
   }
   void reverse(frMIdx& x, frMIdx& y, frMIdx& z, frDirEnum& dir) const
   {
@@ -1114,7 +1117,6 @@ class FlexGridGraph
         break;
       default:;
     }
-    return;
   }
   frMIdx getLowerBoundIndex(const frVector<frCoord>& tracks, frCoord v) const;
   frMIdx getUpperBoundIndex(const frVector<frCoord>& tracks, frCoord v) const;
@@ -1122,19 +1124,18 @@ class FlexGridGraph
   void getPrevGrid(frMIdx& gridX,
                    frMIdx& gridY,
                    frMIdx& gridZ,
-                   const frDirEnum dir) const;
+                   frDirEnum dir) const;
   void getNextGrid(frMIdx& gridX,
                    frMIdx& gridY,
                    frMIdx& gridZ,
-                   const frDirEnum dir) const;
+                   frDirEnum dir) const;
   bool isValid(frMIdx x, frMIdx y, frMIdx z) const
   {
     if (x < 0 || y < 0 || z < 0 || x >= (frMIdx) xCoords_.size()
         || y >= (frMIdx) yCoords_.size() || z >= (frMIdx) zCoords_.size()) {
       return false;
-    } else {
-      return true;
     }
+    return true;
   }
   bool isValid(frMIdx x, frMIdx y, frMIdx z, frDirEnum dir) const
   {
@@ -1143,14 +1144,13 @@ class FlexGridGraph
     return sol && isValid(x, y, z);
   }
   // internal init utility
-  void initTracks(
-      const frDesign* design,
-      std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>&
-          horLoc2TrackPatterns,
-      std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>&
-          vertLoc2TrackPatterns,
-      std::map<frLayerNum, dbTechLayerDir>& layerNum2PreRouteDir,
-      const Rect& bbox);
+  void initTracks(const frDesign* design,
+                  std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>&
+                      horLoc2TrackPatterns,
+                  std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>&
+                      vertLoc2TrackPatterns,
+                  std::map<frLayerNum, dbTechLayerDir>& layerNum2PreRouteDir,
+                  const Rect& bbox);
   void initGrids(
       const std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>& xMap,
       const std::map<frCoord, std::map<frLayerNum, frTrackPattern*>>& yMap,
@@ -1186,12 +1186,14 @@ class FlexGridGraph
               const FlexMazeIdx& dstMazeIdx1,
               const FlexMazeIdx& dstMazeIdx2,
               const Point& centerPt);
-  bool hasAlignedUpDefTrack(frLayerNum layerNum,
-                        const map<frLayerNum, frTrackPattern*>& xSubMap,
-                        const map<frLayerNum, frTrackPattern*>& ySubMap) const;
+  bool hasAlignedUpDefTrack(
+      frLayerNum layerNum,
+      const std::map<frLayerNum, frTrackPattern*>& xSubMap,
+      const std::map<frLayerNum, frTrackPattern*>& ySubMap) const;
 
  private:
   bool outOfDieVia(frMIdx x, frMIdx y, frMIdx z, const Rect& dieBox);
+  bool hasOutOfDieViol(frMIdx x, frMIdx y, frMIdx z);
   bool isWorkerBorder(frMIdx v, bool isVert);
 
   template <class Archive>
@@ -1200,10 +1202,11 @@ class FlexGridGraph
     // The wavefront should always be empty here so we don't need to
     // serialize it.
     if (!wavefront_.empty()) {
-      throw std::logic_error("dont't serialize non-empty wavefront");
+      throw std::logic_error("don't serialize non-empty wavefront");
     }
-
-    (ar) & tech_;
+    if (is_loading(ar)) {
+      tech_ = ar.getDesign()->getTech();
+    }
     (ar) & drWorker_;
     (ar) & nodes_;
     (ar) & prevDirs_;
@@ -1219,14 +1222,9 @@ class FlexGridGraph
     (ar) & ggDRCCost_;
     (ar) & ggMarkerCost_;
     (ar) & halfViaEncArea_;
-    (ar) & via2viaMinLen_;
-    (ar) & via2viaMinLenNew_;
-    (ar) & via2turnMinLen_;
-    (ar) & ndr_;
-    (ar) & dstTaperBox;
   }
   friend class boost::serialization::access;
+  friend class FlexDRWorker;
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

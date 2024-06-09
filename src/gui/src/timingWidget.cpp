@@ -33,32 +33,33 @@
 #include "timingWidget.h"
 
 #include <QApplication>
-#include <QHBoxLayout>
-#include <QVBoxLayout>
-#include <QGridLayout>
-#include <QFrame>
-#include <QLabel>
 #include <QClipboard>
-#include <QDebug>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QLabel>
 #include <QMessageBox>
 #include <QSortFilterProxyModel>
-#include <QHeaderView>
+#include <QVBoxLayout>
 
 #include "db_sta/dbSta.hh"
+#include "gui_utils.h"
+#include "staGui.h"
 
 namespace gui {
 
 TimingWidget::TimingWidget(QWidget* parent)
     : QDockWidget("Timing Report", parent),
+      commands_menu_(new QMenu("Commands Menu", this)),
       setup_timing_table_view_(new QTableView(this)),
       hold_timing_table_view_(new QTableView(this)),
       path_details_table_view_(new QTableView(this)),
       capture_details_table_view_(new QTableView(this)),
-      find_object_edit_(new QLineEdit(this)),
-      path_index_spin_box_(new QSpinBox(this)),
-      path_count_spin_box_(new QSpinBox(this)),
       update_button_(new QPushButton("Update", this)),
-      expand_clk_(new QCheckBox("Expand clock", this)),
+      columns_control_container_(new QPushButton("Columns", this)),
+      columns_control_(new QMenu("Columns", this)),
+      settings_button_(new QPushButton("Settings", this)),
+      settings_(new TimingControlsDialog(this)),
       setup_timing_paths_model_(nullptr),
       hold_timing_paths_model_(nullptr),
       path_details_model_(nullptr),
@@ -66,88 +67,107 @@ TimingWidget::TimingWidget(QWidget* parent)
       path_renderer_(std::make_unique<TimingPathRenderer>()),
       cone_renderer_(std::make_unique<TimingConeRenderer>()),
       dbchange_listener_(new GuiDBChangeListener(this)),
+      delay_detail_splitter_(new QSplitter(Qt::Vertical, this)),
       delay_widget_(new QTabWidget(this)),
       detail_widget_(new QTabWidget(this)),
       focus_view_(nullptr)
 {
-  setObjectName("timing_report"); // for settings
-
-  path_count_spin_box_->setRange(0, 10000);
-  path_count_spin_box_->setValue(100);
+  setObjectName("timing_report");  // for settings
 
   QWidget* container = new QWidget(this);
-  QGridLayout* layout = new QGridLayout;
+  QVBoxLayout* layout = new QVBoxLayout;
 
   QFrame* control_frame = new QFrame(this);
   control_frame->setFrameShape(QFrame::StyledPanel);
   control_frame->setFrameShadow(QFrame::Raised);
 
   QHBoxLayout* controls_layout = new QHBoxLayout;
-  controls_layout->addWidget(new QLabel("Paths:", this));
-  controls_layout->addWidget(path_count_spin_box_);
+  controls_layout->addWidget(settings_button_);
+  controls_layout->addWidget(columns_control_container_);
   controls_layout->addWidget(update_button_);
-  controls_layout->insertStretch(0);
+  controls_layout->insertStretch(2);
   control_frame->setLayout(controls_layout);
-  layout->addWidget(control_frame, 0, 0);
+  layout->addWidget(control_frame);
 
   // top half
   delay_widget_->addTab(setup_timing_table_view_, "Setup");
   delay_widget_->addTab(hold_timing_table_view_, "Hold");
-  layout->addWidget(delay_widget_, 1, 0);
+  delay_detail_splitter_->addWidget(delay_widget_);
 
   // bottom half
-  QTabWidget* path_widget = new QTabWidget(this);
-  QWidget* bottom_widget = new QWidget(this);
-  path_widget->addTab(bottom_widget, "Path Details");
-  QGridLayout* bottom_widg_layout = new QGridLayout;
-  bottom_widget->setLayout(bottom_widg_layout);
-  QFrame* frame = new QFrame(this);
-  frame->setFrameShape(QFrame::StyledPanel);
-  frame->setFrameShadow(QFrame::Raised);
-  bottom_widg_layout->addWidget(frame);
+  detail_widget_->addTab(path_details_table_view_, "Data Path Details");
+  detail_widget_->addTab(capture_details_table_view_, "Capture Path Details");
+  delay_detail_splitter_->addWidget(detail_widget_);
 
-  QHBoxLayout* frame_layout = new QHBoxLayout;
-  frame->setLayout(frame_layout);
-  frame_layout->addWidget(new QLabel("Find", this));
-  frame_layout->addWidget(find_object_edit_);
-  find_object_edit_->setFocusPolicy(Qt::ClickFocus);
-  find_object_edit_->setPlaceholderText("Pin or Net");
-
-  frame_layout->addWidget(new QLabel("Path:", this));
-  frame_layout->addWidget(path_index_spin_box_);
-  frame_layout->addWidget(expand_clk_);
-  expand_clk_->setCheckState(Qt::Checked);
-  expand_clk_->setTristate(false);
-
-  detail_widget_->addTab(path_details_table_view_, "Data");
-  detail_widget_->addTab(capture_details_table_view_, "Capture");
-  bottom_widg_layout->addWidget(detail_widget_);
-
-  layout->addWidget(path_widget, 2, 0);
+  layout->addWidget(delay_detail_splitter_);
+  delay_detail_splitter_->setCollapsible(0, false);
+  delay_detail_splitter_->setCollapsible(1, false);
 
   container->setLayout(layout);
   setWidget(container);
 
-  connect(find_object_edit_,
-          SIGNAL(returnPressed()),
-          this,
-          SLOT(findNodeInPathDetails()));
-
-  connect(
-      path_index_spin_box_, SIGNAL(valueChanged(int)), this, SLOT(showPathIndex(int)));
+  addCommandsMenuActions();
 
   connect(dbchange_listener_,
-          SIGNAL(dbUpdated()),
+          &GuiDBChangeListener::dbUpdated,
           this,
-          SLOT(handleDbChange()));
-  connect(
-      update_button_, SIGNAL(clicked()), this, SLOT(populatePaths()));
-  connect(
-      update_button_, SIGNAL(clicked()), dbchange_listener_, SLOT(reset()));
+          &TimingWidget::handleDbChange);
+  connect(update_button_,
+          &QPushButton::clicked,
+          this,
+          &TimingWidget::populatePaths);
+  connect(update_button_,
+          &QPushButton::clicked,
+          dbchange_listener_,
+          &GuiDBChangeListener::reset);
 
-  connect(expand_clk_, SIGNAL(stateChanged(int)), this, SLOT(updateClockRows()));
+  connect(settings_button_,
+          &QPushButton::clicked,
+          this,
+          &TimingWidget::showSettings);
 
-  path_index_spin_box_->setRange(0, 0);
+  connect(
+      settings_, &TimingControlsDialog::inspect, this, &TimingWidget::inspect);
+
+  connect(settings_,
+          &TimingControlsDialog::expandClock,
+          this,
+          &TimingWidget::updateClockRows);
+}
+
+void TimingWidget::setColumnDisplayMenu()
+{
+  int column_index = 0;
+
+  // Populate with all the available columns' actions.
+  for (const auto& [column, name] : TimingPathsModel::getColumnNames()) {
+    QAction* action = new QAction(name, this);
+    action->setCheckable(true);
+    action->setChecked(true);
+
+    connect(action, &QAction::triggered, this, [=](bool checked) {
+      hideColumn(column_index, checked);
+    });
+
+    columns_control_->addAction(action);
+
+    // Uncheck boxes and hide columns based on settings.
+    if (!initial_columns_visibility_.isEmpty()) {
+      if (!initial_columns_visibility_[column_index]) {
+        action->trigger();
+      }
+    }
+
+    ++column_index;
+  }
+
+  columns_control_container_->setMenu(columns_control_);
+}
+
+void TimingWidget::hideColumn(const int index, const bool checked)
+{
+  setup_timing_table_view_->setColumnHidden(index, !checked);
+  hold_timing_table_view_->setColumnHidden(index, !checked);
 }
 
 TimingWidget::~TimingWidget()
@@ -158,9 +178,12 @@ TimingWidget::~TimingWidget()
 void TimingWidget::init(sta::dbSta* sta)
 {
   cone_renderer_->setSTA(sta);
+  settings_->setSTA(sta);
 
-  setup_timing_paths_model_ = new TimingPathsModel(sta, this);
-  hold_timing_paths_model_ = new TimingPathsModel(sta, this);
+  setup_timing_paths_model_
+      = new TimingPathsModel(true, settings_->getSTA(), this);
+  hold_timing_paths_model_
+      = new TimingPathsModel(false, settings_->getSTA(), this);
   path_details_model_ = new TimingPathDetailModel(false, sta, this);
   capture_details_model_ = new TimingPathDetailModel(true, sta, this);
 
@@ -170,6 +193,7 @@ void TimingWidget::init(sta::dbSta* sta)
     view->setSelectionMode(QAbstractItemView::SingleSelection);
     view->setSelectionBehavior(QAbstractItemView::SelectRows);
     view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    view->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
   };
 
   setupTableView(setup_timing_table_view_, setup_timing_paths_model_);
@@ -179,68 +203,124 @@ void TimingWidget::init(sta::dbSta* sta)
 
   // default to sorting by slack
   setup_timing_table_view_->setSortingEnabled(true);
-  setup_timing_table_view_->horizontalHeader()->setSortIndicator(3, Qt::AscendingOrder);
+  setup_timing_table_view_->horizontalHeader()->setSortIndicator(
+      3, Qt::AscendingOrder);
   hold_timing_table_view_->setSortingEnabled(true);
-  hold_timing_table_view_->horizontalHeader()->setSortIndicator(3, Qt::AscendingOrder);
+  hold_timing_table_view_->horizontalHeader()->setSortIndicator(
+      3, Qt::AscendingOrder);
 
-  connect(setup_timing_paths_model_, SIGNAL(modelReset()), this, SLOT(modelWasReset()));
-  connect(hold_timing_paths_model_, SIGNAL(modelReset()), this, SLOT(modelWasReset()));
+  setColumnDisplayMenu();
+
+  connect(setup_timing_paths_model_,
+          &TimingPathsModel::modelReset,
+          this,
+          &TimingWidget::modelWasReset);
+  connect(hold_timing_paths_model_,
+          &TimingPathsModel::modelReset,
+          this,
+          &TimingWidget::modelWasReset);
 
   connect(setup_timing_table_view_->horizontalHeader(),
-          SIGNAL(sortIndicatorChanged(int, Qt::SortOrder)),
+          &QHeaderView::sortIndicatorChanged,
           setup_timing_table_view_->model(),
-          SLOT(sort(int, Qt::SortOrder)));
+          &QAbstractItemModel::sort);
   connect(hold_timing_table_view_->horizontalHeader(),
-          SIGNAL(sortIndicatorChanged(int, Qt::SortOrder)),
+          &QHeaderView::sortIndicatorChanged,
           hold_timing_table_view_->model(),
-          SLOT(sort(int, Qt::SortOrder)));
+          &QAbstractItemModel::sort);
 
-  connect(
-      setup_timing_table_view_->selectionModel(),
-      SIGNAL(selectionChanged(const QItemSelection&, const QItemSelection&)),
-      this,
-      SLOT(selectedRowChanged(const QItemSelection&, const QItemSelection&)));
+  connect(setup_timing_table_view_->selectionModel(),
+          &QItemSelectionModel::selectionChanged,
+          this,
+          &TimingWidget::selectedRowChanged);
 
-  connect(
-      hold_timing_table_view_->selectionModel(),
-      SIGNAL(selectionChanged(const QItemSelection&, const QItemSelection&)),
-      this,
-      SLOT(selectedRowChanged(const QItemSelection&, const QItemSelection&)));
+  connect(setup_timing_table_view_,
+          &QTableView::customContextMenuRequested,
+          this,
+          &TimingWidget::showCommandsMenu);
 
-  connect(
-      path_details_table_view_->selectionModel(),
-      SIGNAL(selectionChanged(const QItemSelection&, const QItemSelection&)),
-      this,
-      SLOT(selectedDetailRowChanged(const QItemSelection&,
-                                    const QItemSelection&)));
-  connect(
-      capture_details_table_view_->selectionModel(),
-      SIGNAL(selectionChanged(const QItemSelection&, const QItemSelection&)),
-      this,
-      SLOT(selectedCaptureRowChanged(const QItemSelection&,
-                                     const QItemSelection&)));
+  connect(hold_timing_table_view_->selectionModel(),
+          &QItemSelectionModel::selectionChanged,
+          this,
+          &TimingWidget::selectedRowChanged);
+
+  connect(hold_timing_table_view_,
+          &QTableView::customContextMenuRequested,
+          this,
+          &TimingWidget::showCommandsMenu);
+
+  connect(path_details_table_view_->selectionModel(),
+          &QItemSelectionModel::selectionChanged,
+          this,
+          &TimingWidget::selectedDetailRowChanged);
+
+  connect(capture_details_table_view_->selectionModel(),
+          &QItemSelectionModel::selectionChanged,
+          this,
+          &TimingWidget::selectedCaptureRowChanged);
 
   clearPathDetails();
+}
+
+void TimingWidget::updatePaths()
+{
+  update_button_->click();
 }
 
 void TimingWidget::readSettings(QSettings* settings)
 {
   settings->beginGroup(objectName());
 
-  path_count_spin_box_->setValue(settings->value("path_count", path_count_spin_box_->value()).toInt());
-  expand_clk_->setCheckState(settings->value("expand_clk", expand_clk_->checkState()).value<Qt::CheckState>());
+  settings_->setPathCount(
+      settings->value("path_count", settings_->getPathCount()).toInt());
+  settings_->setOnePathPerEndpoint(
+      settings->value("one_path_per_endpoint").toBool());
+  settings_->setExpandClock(
+      settings->value("expand_clk", settings_->getExpandClock()).toBool());
+  delay_detail_splitter_->restoreState(
+      settings->value("splitter", delay_detail_splitter_->saveState())
+          .toByteArray());
+
+  setInitialColumnsVisibility(settings->value("columns_visibility"));
 
   settings->endGroup();
+}
+
+void TimingWidget::setInitialColumnsVisibility(
+    const QVariant& columns_visibility)
+{
+  for (QVariant& index_visibility : columns_visibility.toList()) {
+    initial_columns_visibility_.push_back(index_visibility.toBool());
+  }
 }
 
 void TimingWidget::writeSettings(QSettings* settings)
 {
   settings->beginGroup(objectName());
 
-  settings->setValue("path_count", path_count_spin_box_->value());
-  settings->setValue("expand_clk", expand_clk_->checkState());
+  settings->setValue("path_count", settings_->getPathCount());
+  settings->setValue("one_path_per_endpoint",
+                     settings_->getOnePathPerEndpoint());
+  settings->setValue("expand_clk", settings_->getExpandClock());
+  settings->setValue("splitter", delay_detail_splitter_->saveState());
+  settings->setValue("columns_visibility", getColumnsVisibility());
 
   settings->endGroup();
+}
+
+QVariantList TimingWidget::getColumnsVisibility() const
+{
+  QVariantList column_visibility;
+
+  for (int column_index = 0;
+       column_index < setup_timing_paths_model_->columnCount();
+       ++column_index) {
+    // true -> visible
+    column_visibility.push_back(
+        !setup_timing_table_view_->isColumnHidden(column_index));
+  }
+
+  return column_visibility;
 }
 
 void TimingWidget::keyPressEvent(QKeyEvent* key_event)
@@ -248,6 +328,120 @@ void TimingWidget::keyPressEvent(QKeyEvent* key_event)
   if (key_event->matches(QKeySequence::Copy)) {
     copy();
     key_event->accept();
+  }
+}
+
+void TimingWidget::addCommandsMenuActions()
+{
+  connect(
+      commands_menu_->addAction("Closest Match"), &QAction::triggered, [this] {
+        writePathReportCommand(timing_paths_table_index_, CLOSEST_MATCH);
+      });
+
+  connect(commands_menu_->addAction("From Start to End"),
+          &QAction::triggered,
+          [this] {
+            writePathReportCommand(timing_paths_table_index_,
+                                   FROM_START_TO_END);
+          });
+}
+
+void TimingWidget::showCommandsMenu(const QPoint& pos)
+{
+  if (!focus_view_) {
+    return;
+  }
+
+  timing_paths_table_index_ = focus_view_->indexAt(pos);
+
+  commands_menu_->popup(focus_view_->viewport()->mapToGlobal(pos));
+}
+
+// The nodes must be written within curly braces to
+// deal with characters like '$'
+void TimingWidget::writePathReportCommand(const QModelIndex& selected_index,
+                                          const CommandType& type)
+{
+  TimingPathsModel* focus_model
+      = static_cast<TimingPathsModel*>(focus_view_->model());
+  TimingPath* selected_path = focus_model->getPathAt(selected_index);
+
+  if (type == CLOSEST_MATCH) {
+    TimingNodeList* node_list = &selected_path->getPathNodes();
+
+    const int clock_end_idx = selected_path->getClkPathEndIndex();
+    int start_idx = clock_end_idx + 1;
+
+    QString closest_match_command = "report_checks ";
+    QString through_rise_or_fall;
+    QString through_node;
+
+    // We actually write the clock nodes when the path has only clock nodes.
+    if (start_idx == node_list->size()) {
+      start_idx = 0;
+
+      // The first and last node must also be written with -through. The path
+      // cannot be found otherwise.
+      for (int i = start_idx; i < node_list->size(); i++) {
+        through_rise_or_fall = (*node_list)[i]->isRisingEdge()
+                                   ? " -rise_through "
+                                   : " -fall_through ";
+        through_node = QString::fromStdString((*node_list)[i]->getNodeName());
+
+        closest_match_command
+            += through_rise_or_fall + Utils::wrapInCurly(through_node);
+      }
+    } else {
+      QString from_rise_or_fall = (*node_list)[start_idx]->isRisingEdge()
+                                      ? "-rise_from "
+                                      : "-fall_from ";
+      QString start_node
+          = QString::fromStdString(selected_path->getStartStageName());
+
+      closest_match_command
+          += from_rise_or_fall + Utils::wrapInCurly(start_node);
+
+      for (int i = (start_idx + 1); i < (node_list->size() - 1); i++) {
+        through_rise_or_fall = (*node_list)[i]->isRisingEdge()
+                                   ? " -rise_through "
+                                   : " -fall_through ";
+        through_node = QString::fromStdString((*node_list)[i]->getNodeName());
+
+        closest_match_command
+            += through_rise_or_fall + Utils::wrapInCurly(through_node);
+      }
+
+      QString to_rise_or_fall
+          = node_list->back()->isRisingEdge() ? " -rise_to " : " -fall_to ";
+      QString end_node
+          = QString::fromStdString(selected_path->getEndStageName());
+
+      closest_match_command += to_rise_or_fall + Utils::wrapInCurly(end_node);
+    }
+
+    QString path_delay_config = focus_view_ == setup_timing_table_view_
+                                    ? " -path_delay max"
+                                    : " -path_delay min";
+
+    QString fields_and_format
+        = " -fields {capacitance slew input_pins nets fanout} -format "
+          "full_clock_expanded";
+
+    closest_match_command += path_delay_config + fields_and_format;
+
+    emit setCommand(closest_match_command);
+  }
+
+  if (type == FROM_START_TO_END) {
+    QString start_node
+        = QString::fromStdString(selected_path->getStartStageName());
+    QString end_node = QString::fromStdString(selected_path->getEndStageName());
+
+    QString from_start_to_end_command
+        = "report_checks -from " + Utils::wrapInCurly(start_node) + " -to "
+          + Utils::wrapInCurly(end_node);
+
+    emit setCommand(from_start_to_end_command);
   }
 }
 
@@ -278,24 +472,24 @@ void TimingWidget::showPathDetails(const QModelIndex& index)
     focus_view_ = hold_timing_table_view_;
   }
 
-  TimingPathsModel* focus_model = static_cast<TimingPathsModel*>(focus_view_->model());
+  TimingPathsModel* focus_model
+      = static_cast<TimingPathsModel*>(focus_view_->model());
 
   auto* path = focus_model->getPathAt(index);
 
-  path_details_model_->populateModel(path, path->getPathNodes());
-  capture_details_model_->populateModel(path, path->getCaptureNodes());
+  path_details_model_->populateModel(path, &path->getPathNodes());
+  capture_details_model_->populateModel(path, &path->getCaptureNodes());
 
   path_details_table_view_->resizeColumnsToContents();
-  path_details_table_view_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+  path_details_table_view_->horizontalHeader()->setSectionResizeMode(
+      0, QHeaderView::Stretch);
 
   capture_details_table_view_->resizeColumnsToContents();
-  capture_details_table_view_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+  capture_details_table_view_->horizontalHeader()->setSectionResizeMode(
+      0, QHeaderView::Stretch);
 
   path_renderer_->highlight(path);
   emit highlightTimingPath(path);
-
-  path_index_spin_box_->setRange(0, focus_model->rowCount()-1);
-  path_index_spin_box_->setValue(index.row());
 
   updateClockRows();
 
@@ -313,25 +507,27 @@ void TimingWidget::updateClockRows()
     return;
   }
 
-  const bool show = expand_clk_->checkState() == Qt::Checked;
+  const bool show = settings_->getExpandClock();
 
-  auto toggleModelView = [show](TimingPathDetailModel* model, QTableView* view) {
-    model->setExpandClock(show);
+  auto toggleModelView
+      = [show](TimingPathDetailModel* model, QTableView* view) {
+          model->setExpandClock(show);
 
-    for (int row = 0; row < model->rowCount(); row++) {
-      if (model->shouldHide(model->index(row, 0))) {
-        view->hideRow(row);
-      } else {
-        view->showRow(row);
-      }
-    }
-  };
+          for (int row = 0; row < model->rowCount(); row++) {
+            if (model->shouldHide(model->index(row, 0))) {
+              view->hideRow(row);
+            } else {
+              view->showRow(row);
+            }
+          }
+        };
 
   toggleModelView(path_details_model_, path_details_table_view_);
   toggleModelView(capture_details_model_, capture_details_table_view_);
 }
 
-void TimingWidget::highlightPathStage(TimingPathDetailModel* model, const QModelIndex& index)
+void TimingWidget::highlightPathStage(TimingPathDetailModel* model,
+                                      const QModelIndex& index)
 {
   if (!index.isValid()) {
     return;
@@ -355,67 +551,32 @@ void TimingWidget::highlightPathStage(TimingPathDetailModel* model, const QModel
   emit highlightTimingPath(path_renderer_->getPathToRender());
 }
 
-void TimingWidget::findNodeInPathDetails()
-{
-  auto search_node = find_object_edit_->text();
-  QSortFilterProxyModel proxy;
-
-  TimingPathDetailModel* model = path_details_model_;
-  QTableView* view = path_details_table_view_;
-  if (detail_widget_->currentWidget() == capture_details_table_view_) {
-    model = capture_details_model_;
-    view = capture_details_table_view_;
-  }
-
-  proxy.setSourceModel(model);
-  proxy.setFilterKeyColumn(0);
-  proxy.setFilterFixedString(search_node);
-  QModelIndex match_index = proxy.mapToSource(proxy.index(0, 0));
-  if (match_index.isValid()) {
-    const int row = match_index.row();
-    const bool show_clock = expand_clk_->checkState() == Qt::Checked;
-    if (view->isRowHidden(row) && !show_clock) {
-      // turn on expand clock so we can select that row
-      expand_clk_->setCheckState(Qt::Checked);
-    }
-
-    if (!view->isRowHidden(row)) {
-      // double check if row is hidden, since if th clock summary row matched, that is not a node.
-      view->selectRow(row);
-      return;
-    }
-  }
-
-  QMessageBox::information(
-      this, "Node Search: ", search_node + " Match not found!");
-}
-
-void TimingWidget::showPathIndex(int path_idx)
-{
-  if (focus_view_ == nullptr) {
-    return;
-  }
-
-  QModelIndex new_index = focus_view_->model()->index(path_idx, 0);
-  focus_view_->selectRow(new_index.row());
-
-  showPathDetails(new_index);
-}
-
 void TimingWidget::populatePaths()
 {
   clearPathDetails();
 
-  int count = path_count_spin_box_->value();
+  const auto from = settings_->getFromPins();
+  const auto thru = settings_->getThruPins();
+  const auto to = settings_->getToPins();
 
-  setup_timing_paths_model_->populateModel(true, count);
-  hold_timing_paths_model_->populateModel(false, count);
+  populateAndSortModels(from, thru, to);
+}
+
+void TimingWidget::populateAndSortModels(
+    const std::set<const sta::Pin*>& from,
+    const std::vector<std::set<const sta::Pin*>>& thru,
+    const std::set<const sta::Pin*>& to)
+{
+  setup_timing_paths_model_->populateModel(from, thru, to);
+  hold_timing_paths_model_->populateModel(from, thru, to);
 
   // honor selected sort
   auto setup_header = setup_timing_table_view_->horizontalHeader();
-  setup_timing_paths_model_->sort(setup_header->sortIndicatorSection(), setup_header->sortIndicatorOrder());
+  setup_timing_paths_model_->sort(setup_header->sortIndicatorSection(),
+                                  setup_header->sortIndicatorOrder());
   auto hold_header = hold_timing_table_view_->horizontalHeader();
-  hold_timing_paths_model_->sort(hold_header->sortIndicatorSection(), hold_header->sortIndicatorOrder());
+  hold_timing_paths_model_->sort(hold_header->sortIndicatorSection(),
+                                 hold_header->sortIndicatorOrder());
 }
 
 void TimingWidget::selectedRowChanged(const QItemSelection& selected_row,
@@ -429,7 +590,7 @@ void TimingWidget::selectedRowChanged(const QItemSelection& selected_row,
 
     return;
   }
-  auto top_sel_index = sel_indices.first();
+  auto& top_sel_index = sel_indices.first();
   showPathDetails(top_sel_index);
 }
 
@@ -441,7 +602,7 @@ void TimingWidget::selectedDetailRowChanged(
   if (sel_indices.isEmpty()) {
     return;
   }
-  auto top_sel_index = sel_indices.first();
+  auto& top_sel_index = sel_indices.first();
   highlightPathStage(path_details_model_, top_sel_index);
 }
 
@@ -453,22 +614,23 @@ void TimingWidget::selectedCaptureRowChanged(
   if (sel_indices.isEmpty()) {
     return;
   }
-  auto top_sel_index = sel_indices.first();
+  auto& top_sel_index = sel_indices.first();
   highlightPathStage(capture_details_model_, top_sel_index);
 }
 
 void TimingWidget::copy()
 {
-  QTableView* focus_view = static_cast<QTableView*>(delay_widget_->currentWidget());
+  QTableView* focus_view
+      = static_cast<QTableView*>(delay_widget_->currentWidget());
 
   QItemSelectionModel* selection = focus_view->selectionModel();
   QModelIndexList indexes = selection->selectedIndexes();
 
   if (indexes.size() < 1)
     return;
-  auto sel_index = indexes.first();
-  if (focus_view == setup_timing_table_view_ ||
-      focus_view == hold_timing_table_view_) {
+  auto& sel_index = indexes.first();
+  if (focus_view == setup_timing_table_view_
+      || focus_view == hold_timing_table_view_) {
     auto src_index = sel_index.sibling(sel_index.row(), 5);
     auto sink_index = sel_index.sibling(sel_index.row(), 6);
     auto src_node
@@ -532,5 +694,20 @@ void TimingWidget::setBlock(odb::dbBlock* block)
 {
   dbchange_listener_->addOwner(block);
 }
+
+void TimingWidget::showSettings()
+{
+  settings_->populate();
+  settings_->show();
+}
+
+#ifdef ENABLE_CHARTS
+void TimingWidget::reportSlackHistogramPaths(
+    const std::set<const sta::Pin*>& report_pins)
+{
+  clearPathDetails();
+  populateAndSortModels({}, {report_pins}, {});
+}
+#endif
 
 }  // namespace gui

@@ -8,12 +8,6 @@ cmake_minimum_required(VERSION 3.14...3.16)
 project(odb VERSION 0.0.1
   LANGUAGES CXX)
 
-# Configure build version
-configure_file (
-    "${PROJECT_SOURCE_DIR}/include/odb/version.hh.in"
-    "${PROJECT_BINARY_DIR}/include/odb/version.hh"
-)
-
 ############################################################################
 ################################# Targets ##################################
 ############################################################################
@@ -26,10 +20,26 @@ add_subdirectory(src/lefin)
 add_subdirectory(src/lefout)
 add_subdirectory(src/def)
 add_subdirectory(src/zutil)
-add_subdirectory(src/zlib)
-add_subdirectory(src/tm)
 add_subdirectory(src/cdl)
-add_subdirectory(test/cpp)
+
+if(ENABLE_TESTS)
+  add_subdirectory(test)
+endif()
+
+add_library(odb INTERFACE)
+target_link_libraries(odb
+  INTERFACE
+    db
+    cdl
+    defin
+    defout
+    lefin
+    lefout
+    zutil
+    utl_lib
+    ${TCL_LIBRARY}
+)
+
 ############################################################################
 ################################# SWIG #####################################
 ############################################################################
@@ -53,4 +63,19 @@ if (DOXYGEN_FOUND)
   set(DOXYGEN_REFERENCES_RELATION YES)
 
   doxygen_add_docs(docs include)
+endif()
+
+############################################################
+# Unit testing
+############################################################
+if(ENABLE_TESTS)
+  enable_testing()
+
+  add_executable(parseTest
+    ${PROJECT_SOURCE_DIR}/test/parseTest.cpp
+  )
+
+  target_link_libraries(parseTest
+    odb
+  )
 endif()

@@ -1,34 +1,134 @@
-# Copyright (c) 2019, Parallax Software, Inc.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+###############################################################################
+##
+## BSD 3-Clause License
+##
+## Copyright (c) 2019, Parallax Software, Inc.
+## All rights reserved.
+##
+## Redistribution and use in source and binary forms, with or without
+## modification, are permitted provided that the following conditions are met:
+##
+## * Redistributions of source code must retain the above copyright notice, this
+##   list of conditions and the following disclaimer.
+##
+## * Redistributions in binary form must reproduce the above copyright notice,
+##   this list of conditions and the following disclaimer in the documentation
+##   and#or other materials provided with the distribution.
+##
+## * Neither the name of the copyright holder nor the names of its
+##   contributors may be used to endorse or promote products derived from
+##   this software without specific prior written permission.
+##
+## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+## AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+## IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+## ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+## LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+## INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+## CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+## ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+## POSSIBILITY OF SUCH DAMAGE.
+##
+###############################################################################
+
+# The location used by etc/DependencyInstaller.sh
+# lib64 is used for CentOS and openSUSE
+# lib is used for Ubuntu and MacOS
+list(APPEND CMAKE_INSTALL_RPATH
+  "/opt/or-tools/lib64"
+  "/opt/or-tools/lib"
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/src/cmake")
 
+# The location used by etc/DependencyInstaller.sh
+list(APPEND CMAKE_PREFIX_PATH
+  "/opt/or-tools/lib64/cmake"
+  "/opt/or-tools/lib/cmake"
+)
+
 include("openroad")
 
-set(OPENSTA_HOME ${PROJECT_SOURCE_DIR}/src/sta)
+
+if(USE_SYSTEM_OPENSTA)
+  if(NOT OPENSTA_HOME)
+    message(FATAL_ERROR "Please set external OPENSTA_HOME path.")
+  endif()
+else()
+  set(OPENSTA_HOME ${PROJECT_SOURCE_DIR}/src/sta)
+endif()
+
 set(ODB_HOME ${PROJECT_SOURCE_DIR}/src/odb)
 set(DBSTA_HOME ${PROJECT_SOURCE_DIR}/src/dbSta)
 set(RESIZER_HOME ${PROJECT_SOURCE_DIR}/src/rsz)
-set(PAD_HOME ${OPENROAD_HOME}/src/pad)
+set(GUI_HOME ${PROJECT_SOURCE_DIR}/src/gui)
 
 set(OPENROAD_SOURCE
+  Design.cc
+  Timing.cc
+  Tech.cc
   OpenRoad.cc
   Main.cc
   )
 
-set(Boost_USE_STATIC_LIBS ON)
+if(USE_SYSTEM_BOOST)
+  set(Boost_USE_STATIC_LIBS OFF)
+else()
+  set(Boost_USE_STATIC_LIBS ON)
+endif()
+
+if(USE_SYSTEM_OPENSTA)
+  if(NOT OPENSTA_LIBRARY)
+    find_library(OPENSTA_LIBRARY NAMES OpenSTA
+                 PATHS
+                 /usr/lib
+                 /usr/lib64
+                 /usr/local/lib
+                 /usr/local/lib64)
+    if(OPENSTA_LIBRARY)
+      message(STATUS "Found OpenSTA: ${OPENSTA_LIBRARY}")
+    else()
+      message(FATAL_ERROR "OpenSTA not found, set the OPENSTA_LIBRARY manually.")
+    endif()
+  endif()
+  if(NOT OPENSTA_INCLUDE_DIR)
+    set(OPENSTA_INCLUDE_DIR "/usr/include/sta")
+  endif()
+  include_directories(${OPENSTA_INCLUDE_DIR})
+  message(STATUS "Using OPENSTA_INCLUDE_DIR=${OPENSTA_INCLUDE_DIR}")
+else()
+  # local build of opensta
+  set(OPENSTA_LIBRARY "sta_swig")
+endif()
+
+if(USE_SYSTEM_ABC)
+  if(NOT ABC_LIBRARY)
+    find_library(ABC_LIBRARY NAMES abc
+                 PATHS
+                 /usr/lib
+                 /usr/lib64
+                 /usr/local/lib
+                 /usr/local/lib64)
+    if(ABC_LIBRARY)
+      message(STATUS "Found ABC: ${ABC_LIBRARY}")
+      # make sure link dl symbols
+      list(APPEND ABC_LIBRARY "dl")
+    else()
+      message(FATAL_ERROR "ABC not found, set the ABC_LIBRARY manually.")
+    endif()
+  endif()
+  if(NOT ABC_INCLUDE_DIR)
+    set(ABC_INCLUDE_DIR "/usr/include/abc")
+  endif()
+  add_definitions(-DABC_USE_STDINT_H=1)
+  include_directories(${ABC_INCLUDE_DIR})
+  message(STATUS "Using ABC_INCLUDE_DIR=${ABC_INCLUDE_DIR}")
+else()
+  # local build of abc
+  set(ABC_LIBRARY "libabc")
+endif()
 
 ################################################################
 
@@ -66,14 +166,18 @@ if (BUILD_TCLX AND TCLX_H)
   message(STATUS "TclX header: ${TCLX_H}")
 endif()
 
-find_package(SWIG 3.0 REQUIRED)
+find_package(SWIG 4.0 REQUIRED)
+if (SWIG_VERSION VERSION_GREATER_EQUAL "4.1.0")
+  message(STATUS "Using SWIG >= ${SWIG_VERSION} -flatstaticmethod flag for python")
+endif()
 include(UseSWIG)
 
 find_package(Boost REQUIRED)
+message(STATUS "boost: ${Boost_VERSION}")
 find_package(Python3 COMPONENTS Development REQUIRED)
 option(BUILD_PYTHON "Build the Python3 interface" ON)
 
-option(ALLOW_WARNINGS "Flag to allow compilation with compiler warnings: off by default" OFF)
+option(ALLOW_WARNINGS "Flag to allow compilation with compiler warnings: on by default" ON)
 if (NOT ALLOW_WARNINGS)
   add_compile_options(
     $<$<CXX_COMPILER_ID:GNU>:-Werror>
@@ -82,12 +186,25 @@ endif()
 
 add_compile_options(
   -Wall
+  -Wmissing-field-initializers
   -Wredundant-decls
   -Wformat-security
   -Wno-sign-compare
+  -Wp,-D_GLIBCXX_ASSERTIONS
   $<$<CXX_COMPILER_ID:Clang>:-Wno-gnu-zero-variadic-macro-arguments>
-  $<$<CXX_COMPILER_ID:AppleClang>:-Wno-gnu-zero-variadic-macro-arguments>
+  # Needed for floating point stability in FFT (fft_test will check this).
+  # See also https://kristerw.github.io/2021/11/09/fp-contract/
+  -ffp-contract=off
+  # Apple clang 14.0.0 deprecates sprintf, which generates 900 warnings.
+  $<$<CXX_COMPILER_ID:AppleClang>:-Wno-deprecated-declarations>
+  $<$<BOOL:${ASAN}>:-fsanitize=address>
+  $<$<BOOL:${ASAN}>:-fno-omit-frame-pointer>
+  $<$<BOOL:${ASAN}>:-g>
 )
+
+if (ASAN)
+  add_link_options(-fsanitize=address)
+endif()
 
 ################################################################
 
@@ -96,7 +213,7 @@ swig_lib(NAME      openroad_swig
          I_FILE    OpenRoad.i
          SCRIPTS   ${OPENSTA_HOME}/tcl/Util.tcl
                    OpenRoad.tcl
-                   ${PAD_HOME}/src/pad.tcl
+                   Metrics.tcl
                    ${ODB_HOME}/src/db/odb.tcl
 )
 
@@ -124,6 +241,9 @@ endif()
 
 find_package(spdlog REQUIRED)
 message(STATUS "spdlog: ${spdlog_VERSION}")
+if (${SPDLOG_FMT_EXTERNAL})
+  message(WARNING "spdlog: SPDLOG_FMT_EXTERNAL=${SPDLOG_FMT_EXTERNAL}")
+endif()
 
 find_package(Threads REQUIRED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -132,8 +252,15 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 # Build flow tools
 add_subdirectory(ifp)
+add_subdirectory(pad)
 add_subdirectory(odb)
-add_subdirectory(sta)
+if (NOT USE_SYSTEM_OPENSTA)
+  if (TCL_READLINE_LIBRARY AND TCL_READLINE_H)
+    # Pass along tcl readline enablement to OpenSTA build
+    set(USE_TCL_READLINE ON)
+  endif()
+  add_subdirectory(sta)
+endif()
 add_subdirectory(dbSta)
 add_subdirectory(rsz)
 add_subdirectory(stt)
@@ -147,16 +274,18 @@ add_subdirectory(cts)
 add_subdirectory(grt)
 add_subdirectory(tap)
 add_subdirectory(mpl)
-add_subdirectory(mpl2)
 add_subdirectory(rcx)
 add_subdirectory(psm)
-add_subdirectory(par)
 add_subdirectory(ant)
 add_subdirectory(gui)
 add_subdirectory(drt)
+add_subdirectory(upf)
 add_subdirectory(utl)
 add_subdirectory(dst)
 add_subdirectory(pdn)
+add_subdirectory(dft)
+add_subdirectory(mpl2)
+add_subdirectory(par)
 
 ################################################################
 
@@ -169,8 +298,18 @@ target_compile_options(openroad
     -Wextra -pedantic -Wcast-qual
 )
 
-# Disable compiler specific extensions like gnu++11.
-set_target_properties(openroad PROPERTIES CXX_EXTENSIONS OFF)
+# Needed for boost stacktrace
+if(APPLE)
+  target_compile_definitions(openroad PUBLIC "-D_GNU_SOURCE")
+endif()
+
+
+set_target_properties(openroad PROPERTIES
+  # Disable compiler specific extensions like gnu++11.
+  CXX_EXTENSIONS OFF
+  # Export symbols for stack trace printing
+  ENABLE_EXPORTS ON
+)
 target_compile_features(openroad PUBLIC cxx_std_17)
 
 target_include_directories(openroad
@@ -179,8 +318,8 @@ target_include_directories(openroad
 )
 
 target_link_libraries(openroad
-  libabc #libabc must be in the link order before OpenSTA due to a conflicting zlib
   ifp
+  pad
   openroad_swig
   gpl
   dpl
@@ -202,15 +341,20 @@ target_link_libraries(openroad
   drt
   dst
   mpl
-  mpl2
   psm
   ant
-  par
+  upf
   utl
   pdn
+  dft
+  mpl2
+  par
+  ${ABC_LIBRARY}
   ${TCL_LIBRARY}
   ${CMAKE_THREAD_LIBS_INIT}
 )
+
+target_compile_definitions(openroad PRIVATE BUILD_TYPE="${CMAKE_BUILD_TYPE}")
 
 # tclReadline
 if (TCL_READLINE_LIBRARY AND TCL_READLINE_H)
@@ -245,10 +389,10 @@ if (Python3_FOUND AND BUILD_PYTHON)
   target_compile_definitions(openroad PRIVATE ENABLE_PYTHON3)
 
   swig_lib(NAME      openroad_swig_py
-		   NAMESPACE ord
-		   LANGUAGE  python
-		   I_FILE    OpenRoad-py.i
-		   SCRIPTS   ${CMAKE_CURRENT_BINARY_DIR}/openroad_swig_py.py
+           NAMESPACE ord
+           LANGUAGE  python
+           I_FILE    OpenRoad-py.i
+           SCRIPTS   ${CMAKE_CURRENT_BINARY_DIR}/openroad_swig_py.py
   )
 
   target_link_libraries(openroad_swig_py
@@ -259,8 +403,29 @@ if (Python3_FOUND AND BUILD_PYTHON)
   )
   target_link_libraries(openroad
     openroad_swig_py
-    odbpy
+    odb_py
+    ifp_py
+    utl_py
+    ant_py
+    grt_py
+    gpl_py
+    dpl_py
+    mpl_py
+    ppl_py
+    tap_py
+    cts_py
+    drt_py
+    dpo_py
+    fin_py
+    rcx_py
+    rmp_py
+    stt_py
+    psm_py
+    pdn_py
+    dft_py
+    par_py
   )
+
 else()
   message(STATUS "Python3 disabled")
 endif()
@@ -294,6 +459,11 @@ endif()
 
 # executable
 install(TARGETS openroad DESTINATION bin)
+
+
+if(BUILD_MAN)
+  install(DIRECTORY ${MANPAGE_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man)
+endif()
 
 ################################################################
 

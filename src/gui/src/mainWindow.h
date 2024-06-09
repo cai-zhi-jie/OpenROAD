@@ -40,9 +40,9 @@
 #include <memory>
 
 #include "findDialog.h"
+#include "gotoDialog.h"
 #include "gui/gui.h"
 #include "ord/OpenRoad.hh"
-#include "heatMap.h"
 #include "ruler.h"
 
 namespace odb {
@@ -52,10 +52,15 @@ class dbDatabase;
 namespace utl {
 class Logger;
 }
-
+#ifdef ENABLE_CHARTS
+namespace sta {
+class Pin;
+}
+#endif
 namespace gui {
 
 class LayoutViewer;
+class LayoutTabs;
 class SelectHighlightWindow;
 class LayoutScroll;
 class ScriptWidget;
@@ -63,10 +68,13 @@ class DisplayControls;
 class Inspector;
 class TimingWidget;
 class DRCWidget;
+class ClockWidget;
+class BrowserWidget;
+class ChartsWidget;
 
 // This is the main window for the GUI.  Currently we use a single
 // instance of this class.
-class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
+class MainWindow : public QMainWindow, public ord::OpenRoadObserver
 {
   Q_OBJECT
 
@@ -91,19 +99,19 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   void fit();
 
   DisplayControls* getControls() const { return controls_; }
-  LayoutViewer* getLayoutViewer() const { return viewer_; }
+  LayoutViewer* getLayoutViewer() const;
+  LayoutTabs* getLayoutTabs() const { return viewers_; }
   DRCWidget* getDRCViewer() const { return drc_viewer_; }
+  ClockWidget* getClockViewer() const { return clock_viewer_; }
   ScriptWidget* getScriptWidget() const { return script_; }
   Inspector* getInspector() const { return inspector_; }
 
-  const std::vector<std::string> getRestoreTclCommands();
-
-  void setHeatMapSetting(const std::string& map, const std::string& option, const Renderer::Setting& value);
+  std::vector<std::string> getRestoreTclCommands();
 
  signals:
   // Signaled when we get a postRead callback to tell the sub-widgets
   // to update
-  void designLoaded(odb::dbBlock* block);
+  void blockLoaded(odb::dbBlock* block);
 
   // The user chose the exit action; notify the app
   void exit();
@@ -127,6 +135,8 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   // Ruler Requested on the Layout
   void rulersChanged();
 
+  void displayUnitsChanged(int dbu_per_micron, bool useDBU);
+
  public slots:
   // Save the current state into settings for the next session.
   void saveSettings();
@@ -143,6 +153,9 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   // Add the selections to the current selections
   void addSelected(const SelectionSet& selections);
 
+  // Sets and replaces the current selections
+  void setSelected(const SelectionSet& selections);
+
   // Remove a selection from the set of selections
   void removeSelected(const Selected& selection);
 
@@ -153,10 +166,19 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   void setSelected(const Selected& selection, bool show_connectivity = false);
 
   // Add the selections to highlight set
-  void addHighlighted(const SelectionSet& selection, int highlight_group = -1);
+  void addHighlighted(const SelectionSet& highlights, int highlight_group = -1);
+
+  // Remove a selection from the set of highlights
+  void removeHighlighted(const Selected& selection);
 
   // Add Ruler to Layout View
-  std::string addRuler(int x0, int y0, int x1, int y1, const std::string& label = "", const std::string& name = "");
+  std::string addRuler(int x0,
+                       int y0,
+                       int x1,
+                       int y1,
+                       const std::string& label = "",
+                       const std::string& name = "",
+                       bool euclidian = true);
 
   // Delete Ruler to Layout View
   void deleteRuler(const std::string& name);
@@ -191,27 +213,30 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   // Show Find Dialog Box
   void showFindDialog();
 
+  // Show Goto Dialog Box
+  void showGotoDialog();
+
   // Show help in browser
   void showHelp();
 
   // add/remove toolbar button
-  const std::string addToolbarButton(const std::string& name,
-                                     const QString& text,
-                                     const QString& script,
-                                     bool echo);
+  std::string addToolbarButton(const std::string& name,
+                               const QString& text,
+                               const QString& script,
+                               bool echo);
   void removeToolbarButton(const std::string& name);
 
   // add/remove menu actions
-  const std::string addMenuItem(const std::string& name,
-                                const QString& path,
-                                const QString& text,
-                                const QString& script,
-                                const QString& shortcut,
-                                bool echo);
+  std::string addMenuItem(const std::string& name,
+                          const QString& path,
+                          const QString& text,
+                          const QString& script,
+                          const QString& shortcut,
+                          bool echo);
   void removeMenuItem(const std::string& name);
 
   // request for user input
-  const std::string requestUserInput(const QString& title, const QString& question);
+  std::string requestUserInput(const QString& title, const QString& question);
 
   bool anyObjectInSet(bool selection_set, odb::dbObjectType obj_type);
   void selectHighlightConnectedInsts(bool select_flag, int highlight_group = 0);
@@ -219,13 +244,24 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
                                     bool output,
                                     bool input,
                                     int highlight_group = 0);
+  void selectHighlightConnectedBufferTrees(bool select_flag,
+                                           int highlight_group = 0);
 
-  void timingCone(std::variant<odb::dbITerm*, odb::dbBTerm*> term, bool fanin, bool fanout);
+  void timingCone(Gui::odbTerm term, bool fanin, bool fanout);
+  void timingPathsThrough(const std::set<Gui::odbTerm>& terms);
+
+  void registerHeatMap(HeatMapDataSource* heatmap);
+  void unregisterHeatMap(HeatMapDataSource* heatmap);
 
  private slots:
   void setUseDBU(bool use_dbu);
   void setClearLocation();
-
+  void showApplicationFont();
+  void showGlobalConnect();
+  void openDesign();
+#ifdef ENABLE_CHARTS
+  void reportSlackHistogramPaths(const std::set<const sta::Pin*>& report_pins);
+#endif
 
  protected:
   // used to check if user intends to close Openroad or just the GUI.
@@ -246,8 +282,6 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
 
   int requestHighlightGroup();
 
-  const std::vector<HeatMapDataSource*> getHeatMaps();
-
   odb::dbBlock* getBlock() const;
 
   std::string convertDBUToString(int value, bool add_units) const;
@@ -257,20 +291,23 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   utl::Logger* logger_;
   SelectionSet selected_;
   HighlightSet highlighted_;
-  std::vector<std::unique_ptr<Ruler>> rulers_;
+  Rulers rulers_;
 
   // All but viewer_ are owned by this widget.  Qt will
   // handle destroying the children.
   DisplayControls* controls_;
   Inspector* inspector_;
   ScriptWidget* script_;
-  LayoutViewer* viewer_;  // owned by scroll_
+  LayoutTabs* viewers_;
   SelectHighlightWindow* selection_browser_;
-  LayoutScroll* scroll_;
   TimingWidget* timing_widget_;
   DRCWidget* drc_viewer_;
+  ClockWidget* clock_viewer_;
+  BrowserWidget* hierarchy_widget_;
+  ChartsWidget* charts_widget_;
 
   FindObjectDialog* find_dialog_;
+  GotoLocationDialog* goto_dialog_;
 
   QMenu* file_menu_;
   QMenu* view_menu_;
@@ -279,6 +316,7 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
 
   QToolBar* view_tool_bar_;
 
+  QAction* open_;
   QAction* exit_;
   QAction* hide_option_;
   QAction* hide_;
@@ -288,9 +326,13 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   QAction* timing_debug_;
   QAction* zoom_in_;
   QAction* zoom_out_;
+  QAction* goto_position_;
   QAction* help_;
   QAction* build_ruler_;
   QAction* show_dbu_;
+  QAction* default_ruler_style_;
+  QAction* font_;
+  QAction* global_connect_;
 
   QLabel* location_;
 
@@ -300,10 +342,10 @@ class MainWindow : public QMainWindow, public ord::OpenRoad::Observer
   // created menu actions
   std::map<const std::string, std::unique_ptr<QAction>> menu_actions_;
 
-  // global heat maps
-  RoutingCongestionDataSource routing_congestion_data_;
-  PlacementDensityDataSource placement_density_data_;
-  PowerDensityDataSource power_density_data_;
+  // heat map actions
+  std::map<HeatMapDataSource*, QAction*> heatmap_actions_;
+
+  static constexpr const char* window_title_ = "OpenROAD";
 };
 
 }  // namespace gui

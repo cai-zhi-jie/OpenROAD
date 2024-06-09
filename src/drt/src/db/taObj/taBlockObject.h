@@ -26,25 +26,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _TA_BLOCKOBJECT_H_
-#define _TA_BLOCKOBJECT_H_
+#pragma once
 
 #include "db/obj/frBlockObject.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
+
 class taBlockObject : public frBlockObject
 {
- public:
-  virtual ~taBlockObject() {}
-  // getters
-  // setters
-  // others
- protected:
-  // constructors
-  taBlockObject() {}
-  taBlockObject(const taBlockObject& in) : frBlockObject(in) {}
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

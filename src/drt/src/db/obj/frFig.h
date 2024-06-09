@@ -26,28 +26,26 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_FIG_H_
-#define _FR_FIG_H_
+#pragma once
 
 #include <memory>
 
 #include "db/infra/frBox.h"
 #include "db/obj/frBlockObject.h"
 
-namespace fr {
+namespace drt {
 class frFig : public frBlockObject
 {
  public:
   // getters
-  virtual void getBBox(Rect& box) const = 0;
+  virtual Rect getBBox() const = 0;
   // setters
   // others
   virtual void move(const dbTransform& xform) = 0;
   virtual bool intersects(const Rect& box) const = 0;
 
  protected:
-  // constructors
-  frFig() : frBlockObject() {}
+  frFig() = default;
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -76,8 +74,7 @@ class frConnFig : public frFig
    * overlaps
    */
  protected:
-  // constructors
-  frConnFig() : frFig() {}
+  frConnFig() = default;
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -89,6 +86,7 @@ class frConnFig : public frFig
 };
 
 class frPin;
+class frBPin;
 class frPinFig : public frConnFig
 {
  public:
@@ -97,6 +95,7 @@ class frPinFig : public frConnFig
   virtual frPin* getPin() const = 0;
   // setters
   virtual void addToPin(frPin* in) = 0;
+  virtual void addToPin(frBPin* in) = 0;
   virtual void removeFromPin() = 0;
   // others
 
@@ -113,7 +112,7 @@ class frPinFig : public frConnFig
    * overlaps
    */
  protected:
-  frPinFig() : frConnFig() {}
+  frPinFig() = default;
 
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
@@ -124,6 +123,4 @@ class frPinFig : public frConnFig
   friend class boost::serialization::access;
 };
 
-}  // namespace fr
-
-#endif
+}  // namespace drt

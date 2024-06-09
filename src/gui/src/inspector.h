@@ -35,12 +35,12 @@
 #include <QDockWidget>
 #include <QItemDelegate>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
 #include <QStandardItemModel>
 #include <QTimer>
 #include <QTreeView>
 #include <QVBoxLayout>
-
 #include <memory>
 #include <vector>
 
@@ -55,13 +55,14 @@ class EditorItemDelegate : public QItemDelegate
 
  public:
   // positions in ->data() where data is located
-  static const int editor_        = Qt::UserRole;
-  static const int editor_name_   = Qt::UserRole+1;
-  static const int editor_type_   = Qt::UserRole+2;
-  static const int editor_select_ = Qt::UserRole+3;
-  static const int selected_      = Qt::UserRole+4;
+  static const int editor_ = Qt::UserRole;
+  static const int editor_name_ = Qt::UserRole + 1;
+  static const int editor_type_ = Qt::UserRole + 2;
+  static const int editor_select_ = Qt::UserRole + 3;
+  static const int selected_ = Qt::UserRole + 4;
 
-  enum EditType {
+  enum EditType
+  {
     NUMBER,
     STRING,
     BOOL,
@@ -74,8 +75,7 @@ class EditorItemDelegate : public QItemDelegate
                         const QStyleOptionViewItem& option,
                         const QModelIndex& index) const override;
 
-  void setEditorData(QWidget* editor,
-                     const QModelIndex& index) const override;
+  void setEditorData(QWidget* editor, const QModelIndex& index) const override;
   void setModelData(QWidget* editor,
                     QAbstractItemModel* model,
                     const QModelIndex& index) const override;
@@ -97,7 +97,8 @@ class SelectedItemModel : public QStandardItemModel
                     const QColor& editable,
                     QObject* parent = nullptr);
 
-  QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+  QVariant data(const QModelIndex& index,
+                int role = Qt::DisplayRole) const override;
 
   const QColor& getSelectableColor() { return selectable_item_; }
   const QColor& getEditableColor() { return editable_item_; }
@@ -109,14 +110,20 @@ class SelectedItemModel : public QStandardItemModel
   void updateObject();
 
  private:
-  void makePropertyItem(const Descriptor::Property& property, QStandardItem*& name_item, QStandardItem*& value_item);
+  void makePropertyItem(const Descriptor::Property& property,
+                        QStandardItem*& name_item,
+                        QStandardItem*& value_item);
   QStandardItem* makeItem(const QString& name);
   QStandardItem* makeItem(const std::any& item, bool short_name = false);
 
-  template<typename Iterator>
-  QStandardItem* makeList(QStandardItem* name_item, const Iterator& begin, const Iterator& end);
-  template<typename Iterator>
-  QStandardItem* makePropertyList(QStandardItem* name_item, const Iterator& begin, const Iterator& end);
+  template <typename Iterator>
+  QStandardItem* makeList(QStandardItem* name_item,
+                          const Iterator& begin,
+                          const Iterator& end);
+  template <typename Iterator>
+  QStandardItem* makePropertyList(QStandardItem* name_item,
+                                  const Iterator& begin,
+                                  const Iterator& end);
 
   void makeItemEditor(const std::string& name,
                       QStandardItem* item,
@@ -131,7 +138,8 @@ class SelectedItemModel : public QStandardItemModel
 
 class ActionLayout : public QLayout
 {
-  // modified from: https://doc.qt.io/qt-5/qtwidgets-layouts-flowlayout-example.html
+  // modified from:
+  // https://doc.qt.io/qt-5/qtwidgets-layouts-flowlayout-example.html
   Q_OBJECT
 
  public:
@@ -190,7 +198,9 @@ class Inspector : public QDockWidget
   Q_OBJECT
 
  public:
-  Inspector(const SelectionSet& selected, const HighlightSet& highlighted, QWidget* parent = nullptr);
+  Inspector(const SelectionSet& selected,
+            const HighlightSet& highlighted,
+            QWidget* parent = nullptr);
 
   const Selected& getSelection() { return selection_; }
 
@@ -205,11 +215,15 @@ class Inspector : public QDockWidget
   void addHighlight(const SelectionSet& selection);
   void removeHighlight(const QList<const Selected*>& selected);
 
+  void setCommand(const QString& command);
+
  public slots:
   void inspect(const Selected& object);
   void clicked(const QModelIndex& index);
+  void doubleClicked(const QModelIndex& index);
   void update(const Selected& object = Selected());
   void highlightChanged();
+  void focusNetsChanged();
 
   int selectNext();
   int selectPrevious();
@@ -225,6 +239,8 @@ class Inspector : public QDockWidget
   void indexClicked();
   void indexDoubleClicked(const QModelIndex& index);
 
+  void showCommandsMenu(const QPoint& pos);
+
  private:
   void handleAction(QWidget* action);
   void loadActions();
@@ -236,6 +252,11 @@ class Inspector : public QDockWidget
   bool isHighlighted(const Selected& selected);
 
   void makeAction(const Descriptor::Action& action);
+
+  void navigateBack();
+
+  void setCommandsMenu();
+  void writePathReportCommand();
 
   // The columns in the tree view
   enum Column
@@ -257,8 +278,13 @@ class Inspector : public QDockWidget
   QLabel* selected_itr_label_;
   QTimer mouse_timer_;
   QModelIndex clicked_index_;
+  QMenu* commands_menu_;
+
+  std::string report_text_;
 
   const HighlightSet& highlighted_;
+
+  std::vector<Selected> navigation_history_;
 
   std::map<QWidget*, Descriptor::ActionCallback> actions_;
   Descriptor::ActionCallback deselect_action_;

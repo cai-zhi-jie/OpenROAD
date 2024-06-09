@@ -25,13 +25,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "boostParser.h"
 #include <iostream>
 #include <string>
 
-#include "db.h"
+#include "boostParser.h"
 #include "lefLayerPropParser.h"
-#include "lefin.h"
+#include "odb/db.h"
+#include "odb/lefin.h"
 
 namespace lefTechLayerCornerSpacing {
 
@@ -87,8 +87,9 @@ void addSpacing(
   auto spacing2 = at_c<2>(params);
   if (spacing2.is_initialized()) {
     rule->addSpacing(width, spacing1, lefin->dbdist(spacing2.value()));
-  } else
+  } else {
     rule->addSpacing(width, spacing1, spacing1);
+  }
 }
 template <typename Iterator>
 bool parse(Iterator first,
@@ -105,8 +106,12 @@ bool parse(Iterator first,
              odb::dbTechLayerCornerSpacingRule::CONVEXCORNER)]
          >> -(lit("SAMEMASK")[boost::bind(
              &odb::dbTechLayerCornerSpacingRule::setSameMask, rule, true)])
-         >> -(lit("CORNERONLY")
-              >> double_[boost::bind(&setWithin, _1, rule, lefin)])
+         >> -((lit("CORNERONLY")
+               >> double_[boost::bind(&setWithin, _1, rule, lefin)])
+              | lit("CORNERTOCORNER")[boost::bind(
+                  &odb::dbTechLayerCornerSpacingRule::setCornerToCorner,
+                  rule,
+                  true)])
          >> -(lit("EXCEPTEOL")
               >> double_[boost::bind(&setEolWidth, _1, rule, lefin)]
               >> -(lit("EXCEPTJOGLENGTH")
@@ -149,8 +154,9 @@ bool parse(Iterator first,
   bool valid = qi::phrase_parse(first, last, cornerSpacingRule, space)
                && first == last;
 
-  if (!valid)
+  if (!valid) {
     odb::dbTechLayerCornerSpacingRule::destroy(rule);
+  }
 
   return valid;
 }

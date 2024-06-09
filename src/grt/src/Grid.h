@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <boost/icl/interval.hpp>
 #include <cmath>
 #include <iostream>
 #include <map>
@@ -42,6 +43,8 @@
 
 #include "RoutingTracks.h"
 #include "odb/db.h"
+
+using boost::icl::interval;
 
 namespace grt {
 
@@ -52,8 +55,7 @@ class Grid
   ~Grid() = default;
 
   void init(const odb::Rect& die_area,
-            const int tile_width,
-            const int tile_height,
+            const int tile_size,
             const int x_grids,
             const int y_grids,
             const bool perfect_regular_x,
@@ -71,11 +73,13 @@ class Grid
   int getXMax() const { return die_area_.xMax(); }
   int getYMax() const { return die_area_.yMax(); }
 
-  int getTileWidth() const { return tile_width_; }
-  int getTileHeight() const { return tile_height_; }
+  int getTileSize() const { return tile_size_; }
 
   int getXGrids() const { return x_grids_; }
   int getYGrids() const { return y_grids_; }
+
+  void setXGrids(int x_grids) { x_grids_ = x_grids; }
+  void setYGrids(int y_grids) { y_grids_ = y_grids; }
 
   bool isPerfectRegularX() const { return perfect_regular_x_; }
   bool isPerfectRegularY() const { return perfect_regular_y_; }
@@ -86,40 +90,31 @@ class Grid
   {
     pitches_in_tile_ = pitches_in_tile;
   }
+
   int getPitchesInTile() const { return pitches_in_tile_; }
 
-  const std::vector<int>& getSpacings() const { return spacings_; }
-  const std::vector<int>& getMinWidths() const { return min_widths_; }
+  const std::vector<int>& getTrackPitches() const { return track_pitches_; }
 
-  void addSpacing(int value, int layer) { spacings_[layer] = value; }
-  void addMinWidth(int value, int layer) { min_widths_[layer] = value; }
+  void addTrackPitch(int value, int layer) { track_pitches_[layer] = value; }
 
   const std::vector<int>& getHorizontalEdgesCapacities()
   {
     return horizontal_edges_capacities_;
   };
+
   const std::vector<int>& getVerticalEdgesCapacities()
   {
     return vertical_edges_capacities_;
   };
 
-  void addHorizontalCapacity(int value, int layer)
+  void setHorizontalCapacity(int capacity, int layer)
   {
-    horizontal_edges_capacities_[layer] = value;
+    horizontal_edges_capacities_[layer] = capacity;
   }
-  void addVerticalCapacity(int value, int layer)
+  void setVerticalCapacity(int capacity, int layer)
   {
-    vertical_edges_capacities_[layer] = value;
+    vertical_edges_capacities_[layer] = capacity;
   }
-
-  void updateHorizontalEdgesCapacities(int layer, int reduction)
-  {
-    horizontal_edges_capacities_[layer] = reduction;
-  };
-  void updateVerticalEdgesCapacities(int layer, int reduction)
-  {
-    vertical_edges_capacities_[layer] = reduction;
-  };
 
   odb::Point getPositionOnGrid(const odb::Point& position);
 
@@ -131,25 +126,29 @@ class Grid
 
   int computeTileReduce(const odb::Rect& obs,
                         const odb::Rect& tile,
-                        int track_space,
+                        double track_space,
                         bool first,
                         odb::dbTechLayerDir direction);
+
+  interval<int>::type computeTileReduceInterval(const odb::Rect& obs,
+                                                const odb::Rect& tile,
+                                                int track_space,
+                                                bool first,
+                                                odb::dbTechLayerDir direction);
 
   odb::Point getMiddle();
   const odb::Rect& getGridArea() const;
 
  private:
   odb::Rect die_area_;
-  int tile_width_;
-  int tile_height_;
+  int tile_size_;
   int x_grids_;
   int y_grids_;
   bool perfect_regular_x_;
   bool perfect_regular_y_;
   int num_layers_;
   int pitches_in_tile_ = 15;
-  std::vector<int> spacings_;
-  std::vector<int> min_widths_;
+  std::vector<int> track_pitches_;
   std::vector<int> horizontal_edges_capacities_;
   std::vector<int> vertical_edges_capacities_;
 };

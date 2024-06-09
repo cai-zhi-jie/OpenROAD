@@ -26,8 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_PIN_H_
-#define _FR_PIN_H_
+#pragma once
 
 #include <iostream>
 
@@ -36,56 +35,16 @@
 #include "db/obj/frShape.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class frTerm;
 
 class frPin : public frBlockObject
 {
  public:
-  // constructors
-  frPin() : frBlockObject(), term_(nullptr), pinFigs_(), aps_() {}
-  frPin(const frPin& in) : frBlockObject(), term_(in.term_)
-  {
-    for (auto& uPinFig : in.getFigs()) {
-      auto pinFig = uPinFig.get();
-      if (pinFig->typeId() == frcRect) {
-        std::unique_ptr<frPinFig> tmp
-            = std::make_unique<frRect>(*static_cast<frRect*>(pinFig));
-        addPinFig(std::move(tmp));
-      } else if (pinFig->typeId() == frcPolygon) {
-        std::unique_ptr<frPinFig> tmp
-            = std::make_unique<frPolygon>(*static_cast<frPolygon*>(pinFig));
-        addPinFig(std::move(tmp));
-      } else {
-        std::cout << "Unsupported pinFig in copy constructor" << std::endl;
-        exit(1);
-      }
-    }
-  }
-  frPin(const frPin& in, const dbTransform& xform)
-      : frBlockObject(), term_(in.term_)
-  {
-    for (auto& uPinFig : in.getFigs()) {
-      auto pinFig = uPinFig.get();
-      if (pinFig->typeId() == frcRect) {
-        std::unique_ptr<frPinFig> tmp
-            = std::make_unique<frRect>(*static_cast<frRect*>(pinFig));
-        tmp->move(xform);
-        addPinFig(std::move(tmp));
-      } else if (pinFig->typeId() == frcPolygon) {
-        std::unique_ptr<frPinFig> tmp
-            = std::make_unique<frPolygon>(*static_cast<frPolygon*>(pinFig));
-        tmp->move(xform);
-        addPinFig(std::move(tmp));
-      } else {
-        std::cout << "Unsupported pinFig in copy constructor" << std::endl;
-        exit(1);
-      }
-    }
-  }
+  frPin(const frPin& in) = delete;
+  frPin& operator=(const frPin&) = delete;
 
   // getters
-  frTerm* getTerm() const { return term_; }
   const std::vector<std::unique_ptr<frPinFig>>& getFigs() const
   {
     return pinFigs_;
@@ -96,8 +55,6 @@ class frPin : public frBlockObject
   frPinAccess* getPinAccess(int idx) const { return aps_[idx].get(); }
 
   // setters
-  // cannot have setterm, must be available when creating
-  void setTerm(frTerm* in) { term_ = in; }
   void addPinFig(std::unique_ptr<frPinFig> in)
   {
     in->addToPin(this);
@@ -106,29 +63,22 @@ class frPin : public frBlockObject
   void addPinAccess(std::unique_ptr<frPinAccess> in)
   {
     in->setId(aps_.size());
+    in->setPin(this);
     aps_.push_back(std::move(in));
   }
-  // others
-  frBlockObjectEnum typeId() const override { return frcPin; }
+  void setPinAccess(int idx, std::unique_ptr<frPinAccess> in)
+  {
+    in->setId(idx);
+    in->setPin(this);
+    aps_[idx] = std::move(in);
+  }
+  void clearPinAccess() { aps_.clear(); }
 
  protected:
-  frTerm* term_;
-  std::vector<std::unique_ptr<frPinFig>> pinFigs_;  // optional, set later
-  std::vector<std::unique_ptr<frPinAccess>>
-      aps_;  // not copied in copy constructor
+  frPin() = default;
 
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & term_;
-    (ar) & pinFigs_;
-    (ar) & aps_;
-  }
-
-  friend class boost::serialization::access;
+  std::vector<std::unique_ptr<frPinFig>> pinFigs_;
+  std::vector<std::unique_ptr<frPinAccess>> aps_;
 };
 
-}  // namespace fr
-
-#endif
+}  // namespace drt

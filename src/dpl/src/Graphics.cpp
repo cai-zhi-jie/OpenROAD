@@ -32,32 +32,31 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "Graphics.h"
+
+#include "Grid.h"
+#include "Objects.h"
 #include "dpl/Opendp.h"
-#include "ord/OpenRoad.hh"
 
 namespace dpl {
 
 using odb::dbBox;
 
-Graphics::Graphics(Opendp *dp,
+Graphics::Graphics(Opendp* dp,
                    float min_displacement,
-                   const dbInst* debug_instance) :
-  dp_(dp),
-  debug_instance_(debug_instance),
-  block_(nullptr),
-  min_displacement_(min_displacement)
+                   const dbInst* debug_instance)
+    : dp_(dp),
+      debug_instance_(debug_instance),
+      min_displacement_(min_displacement)
 {
   gui::Gui::get()->registerRenderer(this);
 }
 
-void
-Graphics::startPlacement(dbBlock *block)
+void Graphics::startPlacement(dbBlock* block)
 {
   block_ = block;
 }
 
-void
-Graphics::placeInstance(dbInst *instance)
+void Graphics::placeInstance(dbInst* instance)
 {
   if (!instance || instance != debug_instance_) {
     return;
@@ -71,67 +70,62 @@ Graphics::placeInstance(dbInst *instance)
   gui->pause();
 }
 
-void
-Graphics::binSearch(const Cell *cell,
-                    int xl,
-                    int yl,
-                    int xh,
-                    int yh)
+void Graphics::binSearch(const Cell* cell,
+                         GridX xl,
+                         GridY yl,
+                         GridX xh,
+                         GridY yh)
 {
   if (!debug_instance_ || cell->db_inst_ != debug_instance_) {
     return;
   }
-  Rect core = dp_->getCore();
-  int xl_dbu = core.xMin() + xl * dp_->getSiteWidth();
-  int yl_dbu = core.yMin() + yl * dp_->getRowHeight();
-  int xh_dbu = core.xMin() + xh * dp_->getSiteWidth();
-  int yh_dbu = core.yMin() + yh * dp_->getRowHeight();
-  searched_.push_back(Rect(xl_dbu, yl_dbu, xh_dbu, yh_dbu));
+  Rect core = dp_->grid_->getCore();
+  int xl_dbu = core.xMin() + gridToDbu(xl, dp_->grid_->getSiteWidth()).v;
+  int yl_dbu = core.yMin() + gridToDbu(yl, dp_->grid_->getRowHeight(cell)).v;
+  int xh_dbu = core.xMin() + gridToDbu(xh, dp_->grid_->getSiteWidth()).v;
+  int yh_dbu = core.yMin() + gridToDbu(yh, dp_->grid_->getRowHeight(cell)).v;
+  searched_.emplace_back(xl_dbu, yl_dbu, xh_dbu, yh_dbu);
 }
 
-void
-Graphics::endPlacement()
+void Graphics::endPlacement()
 {
   auto gui = gui::Gui::get();
   gui->redraw();
   gui->pause();
 }
 
-void
-Graphics::drawObjects(gui::Painter &painter)
+void Graphics::drawObjects(gui::Painter& painter)
 {
   if (!block_) {
     return;
   }
 
-  // Compare the squared distances to save calling sqrt
-  float min_length = min_displacement_ * dp_->getRowHeight();
-  min_length *= min_length;
+  odb::Rect core = block_->getCoreArea();
 
-  auto core = ord::getCore(block_);
-
-  for (auto cell : dp_->getCells()) {
+  for (const auto& cell : dp_->cells_) {
     if (!cell.is_placed_) {
       continue;
     }
-
-    int lx = core.xMin() + cell.x_;
-    int ly = core.yMin() + cell.y_;
+    // Compare the squared distances to save calling sqrt
+    float min_length = min_displacement_ * dp_->grid_->getRowHeight(&cell).v;
+    min_length *= min_length;
+    DbuX lx{core.xMin() + cell.x_};
+    DbuY ly{core.yMin() + cell.y_};
 
     auto color = cell.db_inst_ ? gui::Painter::gray : gui::Painter::red;
     painter.setPen(color);
     painter.setBrush(color);
-    painter.drawRect(Rect(lx, ly, lx + cell.width_, ly + cell.height_));
+    painter.drawRect(
+        Rect(lx.v, ly.v, lx.v + cell.width_.v, ly.v + cell.height_.v));
 
     if (!cell.db_inst_) {
       continue;
     }
 
-    dbBox *bbox = cell.db_inst_->getBBox();
+    dbBox* bbox = cell.db_inst_->getBBox();
     Point initial_location(bbox->xMin(), bbox->yMin());
-    Point final_location(lx, ly);
-    float len = Point::squaredDistance(initial_location,
-                                       final_location);
+    Point final_location(lx.v, ly.v);
+    float len = Point::squaredDistance(initial_location, final_location);
     if (len < min_length) {
       continue;
     }
@@ -141,9 +135,7 @@ Graphics::drawObjects(gui::Painter &painter)
                      initial_location.y(),
                      final_location.x(),
                      final_location.y());
-    painter.drawCircle(final_location.x(),
-                       final_location.y(),
-                       100);
+    painter.drawCircle(final_location.x(), final_location.y(), 100);
   }
 
   auto color = gui::Painter::cyan;
@@ -155,10 +147,8 @@ Graphics::drawObjects(gui::Painter &painter)
 }
 
 /* static */
-bool
-Graphics::guiActive()
+bool Graphics::guiActive()
 {
   return gui::Gui::enabled();
 }
-
 }  // namespace dpl

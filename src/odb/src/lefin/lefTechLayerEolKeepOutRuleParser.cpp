@@ -29,9 +29,9 @@
 #include <string>
 
 #include "boostParser.h"
-#include "db.h"
 #include "lefLayerPropParser.h"
-#include "lefin.h"
+#include "odb/db.h"
+#include "odb/lefin.h"
 
 namespace odb {
 
@@ -40,22 +40,24 @@ lefTechLayerEolKeepOutRuleParser::lefTechLayerEolKeepOutRuleParser(lefin* l)
   lefin_ = l;
 }
 
-void lefTechLayerEolKeepOutRuleParser::parse(std::string s,
+void lefTechLayerEolKeepOutRuleParser::parse(const std::string& s,
                                              odb::dbTechLayer* layer)
 {
   std::vector<std::string> rules;
   boost::split(rules, s, boost::is_any_of(";"));
-  for (auto rule : rules) {
+  for (auto& rule : rules) {
     boost::algorithm::trim(rule);
-    if (rule.empty())
+    if (rule.empty()) {
       continue;
+    }
     rule += " ; ";
-    if (!parseSubRule(rule, layer))
+    if (!parseSubRule(rule, layer)) {
       lefin_->warning(280,
                       "parse mismatch in layer propery LEF58_EOLKEEPOUT for "
                       "layer {} :\"{}\"",
                       layer->getName(),
                       rule);
+    }
   }
 }
 void lefTechLayerEolKeepOutRuleParser::setClass(
@@ -86,8 +88,6 @@ void lefTechLayerEolKeepOutRuleParser::setInt(
 bool lefTechLayerEolKeepOutRuleParser::parseSubRule(std::string s,
                                                     odb::dbTechLayer* layer)
 {
-  qi::rule<std::string::iterator, std::string(), ascii::space_type> _string;
-  _string %= lexeme[+(char_ - ' ')];
   odb::dbTechLayerEolKeepOutRule* rule
       = odb::dbTechLayerEolKeepOutRule::create(layer);
   qi::rule<std::string::iterator, space_type> EXCEPTWITHIN
@@ -130,8 +130,9 @@ bool lefTechLayerEolKeepOutRuleParser::parseSubRule(std::string s,
   auto last = s.end();
   bool valid
       = qi::phrase_parse(first, last, EOLKEEPOUT, space) && first == last;
-  if (!valid)
+  if (!valid) {
     odb::dbTechLayerEolKeepOutRule::destroy(rule);
+  }
   return valid;
 }
 

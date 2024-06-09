@@ -31,139 +31,207 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 ////////////////////////////////////////////////////////////////////////////////
-// File: network.cxx
 ////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
-// Includes.
-////////////////////////////////////////////////////////////////////////////////
-#include <string.h>
-#include <deque>
-#include <string>
-
 #include "network.h"
 
 namespace dpo {
 
 ////////////////////////////////////////////////////////////////////////////////
-// Forward declarations.
 ////////////////////////////////////////////////////////////////////////////////
-
+Node::Node() = default;
 ////////////////////////////////////////////////////////////////////////////////
-// Classes.
 ////////////////////////////////////////////////////////////////////////////////
-Node::Node()
-    : m_id(0),
-      m_x(0.0),
-      m_y(0.0),
-      m_origX(0.0),
-      m_origY(0.0),
-      m_w(0.0),
-      m_h(0.0),
-      m_type(0),
-      m_fixed(NodeFixed_NOT_FIXED),
-      m_attributes(NodeAttributes_EMPTY),
-      m_etl(EDGETYPE_DEFAULT),
-      m_etr(EDGETYPE_DEFAULT),
-      m_powerTop(dpo::RowPower_UNK),
-      m_powerBot(dpo::RowPower_UNK),
-      m_regionId(0),
-      m_currentOrient(Orientation_N),
-      m_availOrient(Orientation_N) {
-}
-Node::~Node() {}
+bool Node::adjustCurrOrient(const unsigned newOri)
+{
+  // Change the orientation of the cell, but leave the lower-left corner
+  // alone.  This means changing the locations of pins and possibly
+  // changing the edge types as well as the height and width.
+  unsigned curOri = currentOrient_;
+  if (newOri == curOri) {
+    return true;
+  }
 
-Edge::Edge() : m_id(0), m_ndr(0) {}
-
-Edge::~Edge() {}
-
-Pin::Pin()
-    : m_pinW(0.0),
-      m_pinH(0.0),
-      m_dir(Pin::Dir_INOUT),
-      m_pinLayer(0),  
-      m_node(nullptr),
-      m_edge(nullptr),
-      m_offsetX(0.0),
-      m_offsetY(0.0) {
-}
-
-Pin::~Pin() {}
-
-Network::Network() {}
-
-Network::~Network() {
-  deleteFillerNodes();
-
-  for (int i = 0; i < m_shapes.size(); i++) {
-    for (int j = 0; j < m_shapes[i].size(); j++) {
-      delete m_shapes[i][j];
+  if (curOri == Orientation_E || curOri == Orientation_FE
+      || curOri == Orientation_FW || curOri == Orientation_W) {
+    if (newOri == Orientation_N || curOri == Orientation_FN
+        || curOri == Orientation_FS || curOri == Orientation_S) {
+      // Rotate the cell counter-clockwise by 90 degrees.
+      for (Pin* pin : pins_) {
+        const double dx = pin->getOffsetX();
+        const double dy = pin->getOffsetY();
+        pin->setOffsetX(-dy);
+        pin->setOffsetY(dx);
+      }
+      std::swap(h_, w_);
+      if (curOri == Orientation_E) {
+        curOri = Orientation_N;
+      } else if (curOri == Orientation_FE) {
+        curOri = Orientation_FS;
+      } else if (curOri == Orientation_FW) {
+        curOri = Orientation_FN;
+      } else {
+        curOri = Orientation_S;
+      }
     }
-    m_shapes[i].clear();
+  } else {
+    if (newOri == Orientation_E || curOri == Orientation_FE
+        || curOri == Orientation_FW || curOri == Orientation_W) {
+      // Rotate the cell clockwise by 90 degrees.
+      for (Pin* pin : pins_) {
+        const double dx = pin->getOffsetX();
+        const double dy = pin->getOffsetY();
+        pin->setOffsetX(dy);
+        pin->setOffsetY(-dx);
+      }
+      std::swap(h_, w_);
+      if (curOri == Orientation_N) {
+        curOri = Orientation_E;
+      } else if (curOri == Orientation_FS) {
+        curOri = Orientation_FE;
+      } else if (curOri == Orientation_FN) {
+        curOri = Orientation_FW;
+      } else {
+        curOri = Orientation_W;
+      }
+    }
   }
-  m_shapes.clear();
-
-  m_nodeNames.clear();
-  m_edgeNames.clear();
-  m_nodes.clear();
-  m_edges.clear();
-
-  for (int i = 0; i < m_pins.size(); i++) {
-    delete m_pins[i];
+  // Both the current and new orientations should be {N, FN, FS, S} or {E, FE,
+  // FW, W}.
+  int mX = 1;
+  int mY = 1;
+  bool changeEdgeTypes = false;
+  if (curOri == Orientation_E || curOri == Orientation_FE
+      || curOri == Orientation_FW || curOri == Orientation_W) {
+    const bool test1 = (curOri == Orientation_E || curOri == Orientation_FW);
+    const bool test2 = (newOri == Orientation_E || newOri == Orientation_FW);
+    if (test1 != test2) {
+      mX = -1;
+    }
+    const bool test3 = (curOri == Orientation_E || curOri == Orientation_FE);
+    const bool test4 = (newOri == Orientation_E || newOri == Orientation_FE);
+    if (test3 != test4) {
+      changeEdgeTypes = true;
+      mY = -1;
+    }
+  } else {
+    const bool test1 = (curOri == Orientation_N || curOri == Orientation_FS);
+    const bool test2 = (newOri == Orientation_N || newOri == Orientation_FS);
+    if (test1 != test2) {
+      changeEdgeTypes = true;
+      mX = -1;
+    }
+    const bool test3 = (curOri == Orientation_N || curOri == Orientation_FN);
+    const bool test4 = (newOri == Orientation_N || newOri == Orientation_FN);
+    if (test3 != test4) {
+      mY = -1;
+    }
   }
-  m_pins.clear();
+
+  for (Pin* pin : pins_) {
+    pin->setOffsetX(pin->getOffsetX() * mX);
+    pin->setOffsetY(pin->getOffsetY() * mY);
+  }
+  if (changeEdgeTypes) {
+    std::swap(etl_, etr_);
+  }
+  currentOrient_ = newOri;
+  return true;
 }
 
-void Network::deleteFillerNodes() {
-  for (int i = 0; i < m_filler.size(); i++) {
-    delete m_filler[i];
-  }
-  m_filler.clear();
-}
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Pin::Pin() = default;
 
-Node* Network::createAndAddFillerNode(double x,
-    double y, double width, double height) {
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Network::~Network()
+{
+  // Delete edges.
+  for (auto edge : edges_) {
+    delete edge;
+  }
+  edges_.clear();
+  edgeNames_.clear();
+
+  // Delete cells.
+  for (auto node : nodes_) {
+    delete node;
+  }
+  nodes_.clear();
+  nodeNames_.clear();
+
+  // Delete pins.
+  for (auto pin : pins_) {
+    delete pin;
+  }
+  pins_.clear();
+}
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Edge* Network::createAndAddEdge()
+{
+  // Just allocate an edge, append it and give it the id
+  // that corresponds to its index.
+  const int id = (int) edges_.size();
+  Edge* ptr = new Edge();
+  ptr->setId(id);
+  edges_.push_back(ptr);
+  return ptr;
+}
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Node* Network::createAndAddNode()
+{
+  // Just allocate a node, append it and give it the id
+  // that corresponds to its index.
+  const int id = (int) nodes_.size();
+  Node* ptr = new Node();
+  ptr->setId(id);
+  nodes_.push_back(ptr);
+  return ptr;
+}
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+void Network::createAndAddBlockage(const odb::Rect& bounds)
+{
+  blockages_.emplace_back(bounds);
+}
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Node* Network::createAndAddFillerNode(const int left,
+                                      const int bottom,
+                                      const int width,
+                                      const int height)
+{
   Node* ndi = new Node();
-  ndi->setFixed(NodeFixed_FIXED_XY);
-  ndi->setType(NodeType_FILLER);
-  int id = m_nodes.size() + m_filler.size();
+  const int id = (int) nodes_.size();
+  ndi->setFixed(Node::FIXED_XY);
+  ndi->setType(Node::FILLER);
   ndi->setId(id);
   ndi->setHeight(height);
   ndi->setWidth(width);
-  ndi->setY(y);
-  ndi->setX(x);
-
-  m_filler.push_back(ndi);
-  return ndi;
+  ndi->setBottom(bottom);
+  ndi->setLeft(left);
+  nodes_.push_back(ndi);
+  return getNode(id);
 }
-
-Node* Network::createAndAddShapeNode(Node* ndi,
-    double x, double y, double width, double height) {
-  Node* shape = new Node();
-  shape->setFixed(NodeFixed_FIXED_XY);
-  shape->setType(NodeType_SHAPE);
-  shape->setId(-1);
-  shape->setHeight(height);
-  shape->setWidth(width);
-  shape->setY(y);
-  shape->setX(x);
-
-  m_shapes[ndi->getId()].push_back(shape);
-  return shape;
-}
-
-Pin* Network::createAndAddPin() {
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Pin* Network::createAndAddPin()
+{
   Pin* ptr = new Pin();
-  m_pins.push_back(ptr);
+  pins_.push_back(ptr);
   return ptr;
 }
-
-Pin* Network::createAndAddPin(Node* nd, Edge* ed) {
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+Pin* Network::createAndAddPin(Node* nd, Edge* ed)
+{
   Pin* ptr = createAndAddPin();
-  ptr->m_node = nd;
-  ptr->m_edge = ed;
-  ptr->m_node->m_pins.push_back(ptr);
-  ptr->m_edge->m_pins.push_back(ptr);
+  ptr->node_ = nd;
+  ptr->edge_ = ed;
+  ptr->node_->pins_.push_back(ptr);
+  ptr->edge_->pins_.push_back(ptr);
   return ptr;
 }
 

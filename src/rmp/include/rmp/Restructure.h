@@ -41,9 +41,8 @@
 #include "db_sta/dbSta.hh"
 #include "rsz/Resizer.hh"
 
-namespace ord {
-class OpenRoad;
-}  // namespace ord
+namespace abc {
+}  // namespace abc
 
 namespace utl {
 class Logger;
@@ -82,7 +81,10 @@ class Restructure
   Restructure() = default;
   ~Restructure();
 
-  void init(ord::OpenRoad* openroad);
+  void init(utl::Logger* logger,
+            sta::dbSta* open_sta,
+            odb::dbDatabase* db,
+            rsz::Resizer* resizer);
   void reset();
   void run(char* liberty_file_name,
            float slack_threshold,

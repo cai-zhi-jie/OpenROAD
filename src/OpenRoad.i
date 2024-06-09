@@ -44,9 +44,10 @@
 #include "db_sta/dbSta.hh"
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbReadVerilog.hh"
-#include "ord/Version.hh"
 #include "utl/Logger.h"
 #include "ord/OpenRoad.hh"
+
+#include <vector>
 
 ////////////////////////////////////////////////////////////////
 //
@@ -139,7 +140,7 @@ getMacroPlacer()
   return openroad->getMacroPlacer();
 }
 
-mpl::MacroPlacer2 *
+mpl2::MacroPlacer2 *
 getMacroPlacer2()
 {
   OpenRoad *openroad = getOpenRoad();
@@ -160,7 +161,7 @@ getOpenRCX()
   return openroad->getOpenRCX();
 }
 
-triton_route::TritonRoute *
+drt::TritonRoute *
 getTritonRoute()
 {
   OpenRoad *openroad = getOpenRoad();
@@ -207,6 +208,13 @@ getPdnGen()
 {
   OpenRoad *openroad = getOpenRoad();
   return openroad->getPdnGen();
+}
+
+pad::ICeWall*
+getICeWall()
+{
+  OpenRoad *openroad = getOpenRoad();
+  return openroad->getICeWall();
 }
 
 stt::SteinerTreeBuilder*
@@ -256,6 +264,24 @@ using odb::dbTech;
   $1 = sta::tclListSeqLibertyCell($input, interp);
 }
 
+%typemap(in) vector<const char*> * {
+  int argc;
+  Tcl_Obj **argv;
+
+  if (Tcl_ListObjGetElements(interp, $input, &argc, &argv) == TCL_OK) {
+    vector<const char*>* seq = new vector<const char*>;
+    for (int i = 0; i < argc; i++) {
+      int length;
+      const char* str = Tcl_GetStringFromObj(argv[i], &length);
+      seq->push_back(str);
+    }
+    $1 = seq;
+  }
+  else {
+    $1 = nullptr;
+  }
+}
+
 %typemap(in) utl::ToolId {
   int length;
   const char *arg = Tcl_GetStringFromObj($input, &length);
@@ -268,33 +294,72 @@ using odb::dbTech;
 const char *
 openroad_version()
 {
-  return OPENROAD_VERSION;
+  return ord::OpenRoad::getVersion();
 }
 
 const char *
 openroad_git_describe()
 {
-  return OPENROAD_GIT_DESCRIBE;
+  return ord::OpenRoad::getGitDescribe();
+}
+
+const bool 
+openroad_gpu_compiled()
+{
+  return ord::OpenRoad::getGUICompileOption();
+}
+
+const bool
+openroad_python_compiled()
+{
+  return ord::OpenRoad::getPythonCompileOption();
+}
+
+const bool
+openroad_gui_compiled()
+{
+  return ord::OpenRoad::getGUICompileOption();
+}
+
+const bool
+openroad_charts_compiled()
+{
+  return ord::OpenRoad::getChartsCompileOption();
 }
 
 void
 read_lef_cmd(const char *filename,
 	     const char *lib_name,
+	     const char *tech_name,
 	     bool make_tech,
 	     bool make_library)
 {
   OpenRoad *ord = getOpenRoad();
-  ord->readLef(filename, lib_name, make_tech, make_library);
+  ord->readLef(filename, lib_name, tech_name, make_tech, make_library);
 }
 
 void
 read_def_cmd(const char *filename,
+             const char* tech_name,
              bool continue_on_errors,
              bool floorplan_init,
-             bool incremental)
+             bool incremental,
+             bool child)
 {
   OpenRoad *ord = getOpenRoad();
-  ord->readDef(filename, continue_on_errors, floorplan_init, incremental);
+  auto* db = ord->getDb();
+  dbTech* tech;
+  if (tech_name[0] != '\0') {
+    tech = db->findTech(tech_name);
+  } else {
+    tech = db->getTech();
+  }
+  if (!tech) {
+    auto logger = getLogger();
+    logger->error(utl::ORD, 52, "Technology {} not found", tech_name);
+  }
+  ord->readDef(filename, tech, continue_on_errors,
+               floorplan_init, incremental, child);
 }
 
 void
@@ -305,14 +370,30 @@ write_def_cmd(const char *filename,
   ord->writeDef(filename, version);
 }
 
+void
+write_lef_cmd(const char *filename)
+{
+  OpenRoad *ord = getOpenRoad();
+  ord->writeLef(filename);
+}
+
+void
+write_abstract_lef_cmd(const char *filename,
+                       int bloat_factor,
+                       bool bloat_occupied_layers)
+{
+  OpenRoad *ord = getOpenRoad();
+  ord->writeAbstractLef(filename, bloat_factor, bloat_occupied_layers);
+}
+
 
 void 
 write_cdl_cmd(const char *outFilename,
-              const char *mastersFilename,
+              vector<const char*>* mastersFilenames,
               bool includeFillers)
 {
   OpenRoad *ord = getOpenRoad();
-  ord->writeCdl(outFilename, mastersFilename, includeFillers);
+  ord->writeCdl(outFilename, *mastersFilenames, includeFillers);
 }
 
 void
@@ -330,6 +411,13 @@ write_db_cmd(const char *filename)
 }
 
 void
+diff_dbs(const char *filename1, const char *filename2, const char* diffs)
+{
+  OpenRoad *ord = getOpenRoad();
+  ord->diffDbs(filename1, filename2, diffs);
+}
+
+void
 read_verilog_cmd(const char *filename)
 {
   OpenRoad *ord = getOpenRoad();
@@ -337,26 +425,16 @@ read_verilog_cmd(const char *filename)
 }
 
 void
-link_design_db_cmd(const char *design_name)
+link_design_db_cmd(const char *design_name,bool hierarchy)
 {
   OpenRoad *ord = getOpenRoad();
-  ord->linkDesign(design_name);
+  ord->linkDesign(design_name,hierarchy);
 }
 
 void
 ensure_linked()
 {
   return ensureLinked();
-}
-
-void
-write_verilog_cmd(const char *filename,
-		  bool sort,
-		  bool include_pwr_gnd,
-		  vector<LibertyCell*> *remove_cells)
-{
-  OpenRoad *ord = getOpenRoad();
-  ord->writeVerilog(filename, sort, include_pwr_gnd, remove_cells);
 }
 
 void
@@ -391,7 +469,7 @@ get_db_tech()
 bool
 db_has_tech()
 {
-  return getDb()->getTech() != nullptr;
+  return !getDb()->getTechs().empty();
 }
 
 odb::dbBlock *
@@ -416,13 +494,23 @@ get_db_core()
 double
 dbu_to_microns(int dbu)
 {
-  return static_cast<double>(dbu) / getDb()->getTech()->getLefUnits();
+  auto tech = getDb()->getTech();
+  if (!tech) {
+    auto logger = getLogger();
+    logger->error(utl::ORD, 49, "No tech is loaded");
+  }
+  return static_cast<double>(dbu) / tech->getDbUnitsPerMicron();
 }
 
 int
 microns_to_dbu(double microns)
 {
-  return std::round(microns * getDb()->getTech()->getLefUnits());
+  auto tech = getDb()->getTech();
+  if (!tech) {
+    auto logger = getLogger();
+    logger->error(utl::ORD, 50, "No tech is loaded");
+  }
+  return std::round(microns * tech->getDbUnitsPerMicron());
 }
 
 // Common check for placement tools.
@@ -430,23 +518,29 @@ bool
 db_has_rows()
 {
   dbDatabase *db = OpenRoad::openRoad()->getDb();
-  return db->getChip()
-    && db->getChip()->getBlock()
-    && db->getChip()->getBlock()->getRows().size() > 0;
+  if (!db->getChip() || !db->getChip()->getBlock()) {
+    return false;
+  }
+
+  for (odb::dbRow* row : db->getChip()->getBlock()->getRows()) {
+    if (row->getSite()->getClass() != odb::dbSiteClass::PAD) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool
-db_layer_has_tracks(unsigned layerId, bool hor)
+db_layer_has_tracks(odb::dbTechLayer* layer, bool hor)
 {
-  dbDatabase *db = OpenRoad::openRoad()->getDb();
-  dbBlock *block = db->getChip()->getBlock();
-  dbTech *tech = db->getTech();
-  
-  dbTechLayer *layer = tech->findRoutingLayer(layerId);
   if (!layer) {
     return false;
   }
     
+  dbDatabase *db = OpenRoad::openRoad()->getDb();
+  dbBlock *block = db->getChip()->getBlock();
+
   dbTrackGrid *trackGrid = block->findTrackGrid(layer);
   if (!trackGrid) {
     return false;
@@ -460,15 +554,15 @@ db_layer_has_tracks(unsigned layerId, bool hor)
 }
 
 bool
-db_layer_has_hor_tracks(unsigned layerId)
+db_layer_has_hor_tracks(odb::dbTechLayer* layer)
 {
-  return db_layer_has_tracks(layerId, true);
+  return db_layer_has_tracks(layer, true);
 }
 
 bool
-db_layer_has_ver_tracks(unsigned layerId)
+db_layer_has_ver_tracks(odb::dbTechLayer* layer)
 {
-  return db_layer_has_tracks(layerId, false);
+  return db_layer_has_tracks(layer, false);
 }
 
 sta::Sta *
@@ -490,15 +584,6 @@ units_initialized()
   OpenRoad *openroad = getOpenRoad();
   return openroad->unitsInitialized();
 }
-
-#ifdef ENABLE_PYTHON3
-void
-python_cmd(const char* py_command)
-{
-  OpenRoad *openroad = getOpenRoad();
-  return openroad->pythonCommand(py_command);
-}
-#endif
 
 namespace ord {
 
@@ -523,10 +608,10 @@ thread_count()
   return ord->getThreadCount();
 }
 
-void
-delete_all_memory()
+void design_created()
 {
-  ord::deleteAllMemory();
+  OpenRoad *ord = getOpenRoad();
+  ord->designCreated();
 }
 
 }

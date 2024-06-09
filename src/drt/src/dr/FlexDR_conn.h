@@ -33,27 +33,30 @@
 namespace odb {
 class dbDatabase;
 }
-namespace ord {
+namespace utl {
 class Logger;
 }
 
-namespace fr {
+namespace drt {
+
+class TritonRoute;
 
 class FlexDRConnectivityChecker
 {
  public:
-  FlexDRConnectivityChecker(frDesign* design,
+  FlexDRConnectivityChecker(drt::TritonRoute* router,
                             Logger* logger,
-                            odb::dbDatabase* db,
-                            FlexDRGraphics* graphics);
+                            FlexDRGraphics* graphics,
+                            bool save_updates = false);
   void check(int iter = -1);
 
  private:
-  using NetRouteObjs = vector<frConnFig*>;
+  using NetRouteObjs = std::vector<frConnFig*>;
   // layer -> track -> indices of NetRouteObjs
-  using PathSegsByLayerAndTrack = vector<map<frCoord, vector<int>>>;
+  using PathSegsByLayerAndTrack
+      = std::vector<std::map<frCoord, std::vector<int>>>;
   // The track id matches the map iteration order above
-  using PathSegsByLayerAndTrackId = vector<vector<vector<int>>>;
+  using PathSegsByLayerAndTrackId = std::vector<std::vector<std::vector<int>>>;
   struct Span
   {
     frCoord lo;
@@ -63,7 +66,7 @@ class FlexDRConnectivityChecker
       return std::tie(lo, hi) < std::tie(rhs.lo, rhs.hi);
     }
   };
-  using SpansByLayerAndTrackId = vector<vector<vector<Span>>>;
+  using SpansByLayerAndTrackId = std::vector<std::vector<std::vector<Span>>>;
 
   void initRouteObjs(const frNet* net, NetRouteObjs& netRouteObjs);
   void buildPin2epMap(const frNet* net,
@@ -73,11 +76,10 @@ class FlexDRConnectivityChecker
                                frBlockObjectComp>& pin2epMap);
   void pin2epMap_helper(const frNet* net,
                         const Point& pt,
-                        const frLayerNum lNum,
+                        frLayerNum lNum,
                         std::map<frBlockObject*,
                                  std::set<std::pair<Point, frLayerNum>>,
-                                 frBlockObjectComp>& pin2epMap,
-                        const bool isWire);
+                                 frBlockObjectComp>& pin2epMap);
   void buildNodeMap(
       const frNet* net,
       const NetRouteObjs& netRouteObjs,
@@ -96,9 +98,9 @@ class FlexDRConnectivityChecker
       std::map<std::pair<Point, frLayerNum>, std::set<int>>& nodeMap);
   void nodeMap_routeObjSplit_helper(
       const Point& crossPt,
-      const frCoord trackCoord,
-      const frCoord splitCoord,
-      const frLayerNum lNum,
+      frCoord trackCoord,
+      frCoord splitCoord,
+      frLayerNum lNum,
       const std::vector<
           std::map<frCoord, std::map<frCoord, std::pair<frCoord, int>>>>&
           mergeHelper,
@@ -114,59 +116,68 @@ class FlexDRConnectivityChecker
                                        const NetRouteObjs& netRouteObjs,
                                        PathSegsByLayerAndTrack& horzPathSegs,
                                        PathSegsByLayerAndTrack& vertPathSegs);
-  void findSegmentOverlaps(const NetRouteObjs& netRouteObjs,
+  void findSegmentOverlaps(NetRouteObjs& netRouteObjs,
                            const PathSegsByLayerAndTrack& horzPathSegs,
                            const PathSegsByLayerAndTrack& vertPathSegs,
                            PathSegsByLayerAndTrackId& horzVictims,
                            PathSegsByLayerAndTrackId& vertVictims,
                            SpansByLayerAndTrackId& horzNewSegSpans,
                            SpansByLayerAndTrackId& vertNewSegSpans);
-  void mergeSegmentOverlaps(frNet* net,
-                            NetRouteObjs& netRouteObjs,
-                            const PathSegsByLayerAndTrack& horzPathSegs,
-                            const PathSegsByLayerAndTrack& vertPathSegs,
-                            const PathSegsByLayerAndTrackId& horzVictims,
-                            const PathSegsByLayerAndTrackId& vertVictims,
-                            const SpansByLayerAndTrackId& horzNewSegSpans,
-                            const SpansByLayerAndTrackId& vertNewSegSpans);
+  void handleSegmentOverlaps(frNet* net,
+                             NetRouteObjs& netRouteObjs,
+                             const PathSegsByLayerAndTrack& horzPathSegs,
+                             const PathSegsByLayerAndTrack& vertPathSegs,
+                             const PathSegsByLayerAndTrackId& horzVictims,
+                             const PathSegsByLayerAndTrackId& vertVictims,
+                             const SpansByLayerAndTrackId& horzNewSegSpans,
+                             const SpansByLayerAndTrackId& vertNewSegSpans);
   void addMarker(frNet* net, frLayerNum lNum, const Rect& bbox);
-  void merge_perform(const NetRouteObjs& netRouteObjs,
-                     const std::vector<int>& indices,
-                     std::vector<int>& victims,
-                     std::vector<Span>& newSegSpans,
-                     const bool isHorz);
-  void merge_perform_helper(const std::vector<std::pair<Span, int>>& segSpans,
+  void handleOverlaps_perform(NetRouteObjs& netRouteObjs,
+                              const std::vector<int>& indices,
+                              std::vector<int>& victims,
+                              std::vector<Span>& newSegSpans,
+                              bool isHorz);
+  void splitPathSegs(NetRouteObjs& netRouteObjs,
+                     std::vector<std::pair<Span, int>>& segSpans);
+  void splitPathSegs_commit(std::vector<int>& splitPoints,
+                            frPathSeg* highestPs,
+                            int first,
+                            int& i,
+                            std::vector<std::pair<Span, int>>& segSpans,
+                            NetRouteObjs& netRouteObjs);
+  void merge_perform_helper(NetRouteObjs& netRouteObjs,
+                            const std::vector<std::pair<Span, int>>& segSpans,
                             std::vector<int>& victims,
                             std::vector<Span>& newSegSpans);
   void merge_commit(frNet* net,
                     std::vector<frConnFig*>& netRouteObjs,
                     const std::vector<int>& victims,
-                    const frCoord trackCoord,
+                    frCoord trackCoord,
                     const std::vector<Span>& newSegSpans,
-                    const bool isHorz);
+                    bool isHorz);
   bool astar(
       const frNet* net,
       std::vector<char>& adjVisited,
       std::vector<int>& adjPrevIdx,
       const std::map<std::pair<Point, frLayerNum>, std::set<int>>& nodeMap,
       const NetRouteObjs& netRouteObjs,
-      const int gCnt,
-      const int nCnt);
+      int nNetRouteObjs,
+      int nNetObjs);
   void finish(frNet* net,
               NetRouteObjs& netRouteObjs,
               const std::vector<frBlockObject*>& netPins,
               const std::vector<char>& adjVisited,
-              const int gCnt,
-              const int nCnt,
+              int gCnt,
+              int nCnt,
               std::map<std::pair<Point, frLayerNum>, std::set<int>>& nodeMap);
 
-  frRegionQuery* getRegionQuery() const { return design_->getRegionQuery(); }
-  frTechObject* getTech() const { return design_->getTech(); }
-
-  frDesign* design_;
+  frRegionQuery* getRegionQuery() const;
+  frTechObject* getTech() const;
+  frDesign* getDesign() const;
+  drt::TritonRoute* router_;
   Logger* logger_;
-  odb::dbDatabase* db_;
   FlexDRGraphics* graphics_;
+  bool save_updates_;
 };
 
-}  // namespace fr
+}  // namespace drt

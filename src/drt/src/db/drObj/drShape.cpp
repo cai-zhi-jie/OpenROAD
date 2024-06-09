@@ -31,25 +31,41 @@
 #include "db/drObj/drNet.h"
 #include "db/obj/frShape.h"
 
-using namespace std;
-using namespace fr;
+namespace drt {
 
-drPathSeg::drPathSeg(const frPathSeg& in)
-    : layer_(in.getLayerNum()),
-      owner_(nullptr),
-      beginMazeIdx_(),
-      endMazeIdx_(),
-      patchSeg_(false),
-      isTapered_(false)
+Rect drPathSeg::getBBox() const
 {
-  in.getPoints(begin_, end_);
-  in.getStyle(style_);
+  bool isHorizontal = true;
+  if (begin_.x() == end_.x()) {
+    isHorizontal = false;
+  }
+  const auto width = style_.getWidth();
+  const auto beginExt = style_.getBeginExt();
+  const auto endExt = style_.getEndExt();
+  if (isHorizontal) {
+    return Rect(begin_.x() - beginExt,
+                begin_.y() - width / 2,
+                end_.x() + endExt,
+                end_.y() + width / 2);
+  }
+  return Rect(begin_.x() - width / 2,
+              begin_.y() - beginExt,
+              end_.x() + width / 2,
+              end_.y() + endExt);
+}
+
+drPathSeg::drPathSeg(const frPathSeg& in) : layer_(in.getLayerNum())
+{
+  std::tie(begin_, end_) = in.getPoints();
+  style_ = in.getStyle();
   setTapered(in.isTapered());
 }
 
 drPatchWire::drPatchWire(const frPatchWire& in)
     : layer_(in.getLayerNum()), owner_(nullptr)
 {
-  in.getOffsetBox(offsetBox_);
-  in.getOrigin(origin_);
+  offsetBox_ = in.getOffsetBox();
+  origin_ = in.getOrigin();
 }
+
+}  // namespace drt

@@ -32,7 +32,6 @@
 
 #include "dbJournal.h"
 
-#include "db.h"
 #include "dbBTerm.h"
 #include "dbBlock.h"
 #include "dbCCSeg.h"
@@ -41,13 +40,10 @@
 #include "dbInst.h"
 #include "dbNet.h"
 #include "dbRSeg.h"
+#include "odb/db.h"
 #include "utl/Logger.h"
 
 namespace odb {
-
-void invalidateTiming(dbBlock* block);
-void invalidateTiming(dbInst* inst);
-void invalidateTiming(dbNet* net);
 
 dbJournal::dbJournal(dbBlock* block)
     : _block(block),
@@ -747,11 +743,6 @@ void dbJournal::redo_updateBlockField()
       _block->writeDb((char*) name.c_str(), allNode);
       break;
     }
-    case _dbBlock::INVALIDATETIMING: {
-#ifdef TMG_SI
-      invalidateTiming(_block);
-#endif
-    }
 
     default:
       break;
@@ -871,12 +862,6 @@ void dbJournal::redo_updateNetField()
       break;
     }
 
-    case _dbNet::INVALIDATETIMING: {
-#ifdef TMG_SI
-      invalidateTiming((dbNet*) net);
-#endif
-    }
-
     default:
       break;
   }
@@ -929,12 +914,6 @@ void dbJournal::redo_updateInstField()
                  inst->_y);
       ((dbInst*) inst)->setOrigin(current_x, current_y);
       break;
-    }
-
-    case _dbInst::INVALIDATETIMING: {
-#ifdef TMG_SI
-      invalidateTiming((dbInst*) inst);
-#endif
     }
 
     default:
@@ -1395,8 +1374,9 @@ void dbJournal::redo_updateCCSegField()
 //
 void dbJournal::undo()
 {
-  if (_log.empty())
+  if (_log.empty()) {
     return;
+  }
 
   _log.set(_log.size() - sizeof(uint));
 
@@ -1436,8 +1416,9 @@ void dbJournal::undo()
         break;
     }
 
-    if (action_idx == 0)
+    if (action_idx == 0) {
       break;
+    }
 
     _log.set(action_idx -= sizeof(uint));
   }

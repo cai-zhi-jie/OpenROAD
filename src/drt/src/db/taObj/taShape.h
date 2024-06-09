@@ -26,13 +26,12 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _TA_SHAPE_H_
-#define _TA_SHAPE_H_
+#pragma once
 
 #include "db/infra/frSegStyle.h"
 #include "db/taObj/taFig.h"
 
-namespace fr {
+namespace drt {
 class frNet;
 class taPin;
 class frPathSeg;
@@ -66,38 +65,20 @@ class taShape : public taPinFig
    */
  protected:
   // constructors
-  taShape() : taPinFig() {}
+  taShape() = default;
 };
 
 class taPathSeg : public taShape
 {
  public:
   // constructors
-  taPathSeg()
-      : taShape(), begin_(), end_(), layer_(0), style_(), owner_(nullptr)
-  {
-  }
-  taPathSeg(const taPathSeg& in)
-      : begin_(in.begin_),
-        end_(in.end_),
-        layer_(in.layer_),
-        style_(in.style_),
-        owner_(in.owner_)
-  {
-  }
+  taPathSeg() = default;
+  taPathSeg(const taPathSeg& in) = delete;
+  taPathSeg& operator=(const taPathSeg&) = delete;
   taPathSeg(const frPathSeg& in);
   // getters
-  void getPoints(Point& beginIn, Point& endIn) const
-  {
-    beginIn = begin_;
-    endIn = end_;
-  }
-  void getStyle(frSegStyle& styleIn) const
-  {
-    styleIn.setBeginStyle(style_.getBeginStyle(), style_.getBeginExt());
-    styleIn.setEndStyle(style_.getEndStyle(), style_.getEndExt());
-    styleIn.setWidth(style_.getWidth());
-  }
+  std::pair<Point, Point> getPoints() const { return {begin_, end_}; }
+  frSegStyle getStyle() const { return style_; }
   // setters
   void setPoints(const Point& beginIn, const Point& endIn)
   {
@@ -126,10 +107,7 @@ class taPathSeg : public taShape
    * addToPin
    * removeFromPin
    */
-  bool hasPin() const override
-  {
-    return (owner_) && (owner_->typeId() == tacPin);
-  }
+  bool hasPin() const override { return owner_ && owner_->typeId() == tacPin; }
 
   taPin* getPin() const override { return reinterpret_cast<taPin*>(owner_); }
 
@@ -164,7 +142,7 @@ class taPathSeg : public taShape
    * overlaps, in .cpp
    */
   // needs to be updated
-  void getBBox(Rect& boxIn) const override
+  Rect getBBox() const override
   {
     bool isHorizontal = true;
     if (begin_.x() == end_.x()) {
@@ -174,16 +152,15 @@ class taPathSeg : public taShape
     auto beginExt = style_.getBeginExt();
     auto endExt = style_.getEndExt();
     if (isHorizontal) {
-      boxIn.init(begin_.x() - beginExt,
-                 begin_.y() - width / 2,
-                 end_.x() + endExt,
-                 end_.y() + width / 2);
-    } else {
-      boxIn.init(begin_.x() - width / 2,
-                 begin_.y() - beginExt,
-                 end_.x() + width / 2,
-                 end_.y() + endExt);
+      return Rect(begin_.x() - beginExt,
+                  begin_.y() - width / 2,
+                  end_.x() + endExt,
+                  end_.y() + width / 2);
     }
+    return Rect(begin_.x() - width / 2,
+                begin_.y() - beginExt,
+                end_.x() + width / 2,
+                end_.y() + endExt);
   }
   void move(const dbTransform& xform) override
   {
@@ -195,10 +172,9 @@ class taPathSeg : public taShape
  protected:
   Point begin_;  // begin always smaller than end, assumed
   Point end_;
-  frLayerNum layer_;
+  frLayerNum layer_{0};
   frSegStyle style_;
-  frBlockObject* owner_;
+  frBlockObject* owner_{nullptr};
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

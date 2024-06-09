@@ -26,19 +26,14 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_GCELLPATTERN_H_
-#define _FR_GCELLPATTERN_H_
+#pragma once
 
 #include "db/obj/frBlockObject.h"
 
-namespace fr {
+namespace drt {
 class frGCellPattern : public frBlockObject
 {
  public:
-  // constructors
-  frGCellPattern() : horizontal_(false), startCoord_(0), spacing_(0), count_(0)
-  {
-  }
   // getters
   bool isHorizontal() const { return horizontal_; }
   frCoord getStartCoord() const { return startCoord_; }
@@ -53,23 +48,9 @@ class frGCellPattern : public frBlockObject
   frBlockObjectEnum typeId() const override { return frcGCellPattern; }
 
  private:
-  bool horizontal_;
-  frCoord startCoord_;
-  frUInt4 spacing_;
-  frUInt4 count_;
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-    (ar) & horizontal_;
-    (ar) & startCoord_;
-    (ar) & spacing_;
-    (ar) & count_;
-  }
-
-  friend class boost::serialization::access;
+  bool horizontal_{false};
+  frCoord startCoord_{0};
+  frUInt4 spacing_{0};
+  frUInt4 count_{0};
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

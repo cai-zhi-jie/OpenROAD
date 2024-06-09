@@ -26,8 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_NET_H_
-#define _FR_NET_H_
+#pragma once
 
 #include "db/grObj/grShape.h"
 #include "db/grObj/grVia.h"
@@ -40,44 +39,21 @@
 #include "frBaseTypes.h"
 #include "global.h"
 
-namespace fr {
+namespace drt {
 class frInstTerm;
 class frTerm;
+class frBTerm;
 class frNonDefaultRule;
 
 class frNet : public frBlockObject
 {
  public:
   // constructors
-  frNet(const frString& in)
-      : frBlockObject(),
-        name_(in),
-        instTerms_(),
-        terms_(),
-        shapes_(),
-        vias_(),
-        pwires_(),
-        grShapes_(),
-        grVias_(),
-        nodes_(),
-        root_(nullptr),
-        rootGCellNode_(nullptr),
-        firstNonRPinNode_(nullptr),
-        rpins_(),
-        guides_(),
-        type_(dbSigType::SIGNAL),
-        modified_(false),
-        isFakeNet_(false),
-        ndr_(nullptr),
-        absPriorityLvl(0),
-        isClock_(false),
-        isSpecial_(false)
-  {
-  }
+  frNet(const frString& in) : name_(in) {}
   // getters
   const frString& getName() const { return name_; }
   const std::vector<frInstTerm*>& getInstTerms() const { return instTerms_; }
-  const std::vector<frTerm*>& getTerms() const { return terms_; }
+  const std::vector<frBTerm*>& getBTerms() const { return bterms_; }
   const std::list<std::unique_ptr<frShape>>& getShapes() const
   {
     return shapes_;
@@ -104,7 +80,6 @@ class frNet : public frBlockObject
   {
     return rpins_;
   }
-  std::vector<std::unique_ptr<frGuide>>& getGuides() { return guides_; }
   const std::vector<std::unique_ptr<frGuide>>& getGuides() const
   {
     return guides_;
@@ -112,30 +87,46 @@ class frNet : public frBlockObject
   bool isModified() const { return modified_; }
   bool isFake() const { return isFakeNet_; }
   frNonDefaultRule* getNondefaultRule() const { return ndr_; }
+  bool hasInitialRouting() const { return hasInitialRouting_; }
   // setters
   void addInstTerm(frInstTerm* in) { instTerms_.push_back(in); }
-  void addTerm(frTerm* in) { terms_.push_back(in); }
+  void removeInstTerm(frInstTerm* in)
+  {
+    for (auto itr = instTerms_.begin(); itr != instTerms_.end(); itr++) {
+      if (*itr == in) {
+        instTerms_.erase(itr);
+        return;
+      }
+    }
+  }
+  void addBTerm(frBTerm* in) { bterms_.push_back(in); }
   void setName(const frString& stringIn) { name_ = stringIn; }
   void addShape(std::unique_ptr<frShape> in)
   {
     in->addToNet(this);
+    in->setIndexInOwner(all_pinfigs_.size());
     auto rptr = in.get();
     shapes_.push_back(std::move(in));
     rptr->setIter(--shapes_.end());
+    all_pinfigs_.push_back(rptr);
   }
   void addVia(std::unique_ptr<frVia> in)
   {
     in->addToNet(this);
+    in->setIndexInOwner(all_pinfigs_.size());
     auto rptr = in.get();
     vias_.push_back(std::move(in));
     rptr->setIter(--vias_.end());
+    all_pinfigs_.push_back(rptr);
   }
   void addPatchWire(std::unique_ptr<frShape> in)
   {
     in->addToNet(this);
+    in->setIndexInOwner(all_pinfigs_.size());
     auto rptr = in.get();
     pwires_.push_back(std::move(in));
     rptr->setIter(--pwires_.end());
+    all_pinfigs_.push_back(rptr);
   }
   void addGRShape(std::unique_ptr<grShape>& in)
   {
@@ -175,9 +166,21 @@ class frNet : public frBlockObject
   {
     auto rptr = in.get();
     rptr->addToNet(this);
+    in->setIndexInOwner(guides_.size());
     guides_.push_back(std::move(in));
   }
+  void clearRPins() { rpins_.clear(); }
   void clearGuides() { guides_.clear(); }
+  void clearOrigGuides() { orig_guides_.clear(); }
+  void clearConns()
+  {
+    instTerms_.clear();
+    bterms_.clear();
+    nodes_.clear();
+    root_ = nullptr;
+    rootGCellNode_ = nullptr;
+    firstNonRPinNode_ = nullptr;
+  }
   void removeShape(frShape* in) { shapes_.erase(in->getIter()); }
   void removeVia(frVia* in) { vias_.erase(in->getIter()); }
   void removePatchWire(frShape* in) { pwires_.erase(in->getIter()); }
@@ -188,10 +191,17 @@ class frNet : public frBlockObject
   void removeNode(frNode* in) { nodes_.erase(in->getIter()); }
   void setModified(bool in) { modified_ = in; }
   void setIsFake(bool in) { isFakeNet_ = in; }
+  void setHasInitialRouting(bool in) { hasInitialRouting_ = in; }
   // others
+  void clearRoutes()
+  {
+    shapes_.clear();
+    vias_.clear();
+    pwires_.clear();
+  }
   dbSigType getType() const { return type_; }
-  void setType(dbSigType in) { type_ = in; }
-  virtual frBlockObjectEnum typeId() const override { return frcNet; }
+  void setType(const dbSigType& in) { type_ = in; }
+  frBlockObjectEnum typeId() const override { return frcNet; }
   void updateNondefaultRule(frNonDefaultRule* n)
   {
     ndr_ = n;
@@ -209,19 +219,27 @@ class frNet : public frBlockObject
   void updateAbsPriority()
   {
     int max = absPriorityLvl;
-    if (hasNDR())
+    if (hasNDR()) {
       max = std::max(max, NDR_NETS_ABS_PRIORITY);
-    if (isClock())
+    }
+    if (isClock()) {
       max = std::max(max, CLOCK_NETS_ABS_PRIORITY);
+    }
     absPriorityLvl = max;
   }
   bool isSpecial() const { return isSpecial_; }
   void setIsSpecial(bool s) { isSpecial_ = s; }
-  
+  frPinFig* getPinFig(const int& id) { return all_pinfigs_[id]; }
+  void setOrigGuides(const std::vector<frRect>& guides)
+  {
+    orig_guides_ = guides;
+  }
+  const std::vector<frRect>& getOrigGuides() const { return orig_guides_; }
+
  protected:
   frString name_;
   std::vector<frInstTerm*> instTerms_;
-  std::vector<frTerm*> terms_;  // terms is IO
+  std::vector<frBTerm*> bterms_;
   // dr
   std::list<std::unique_ptr<frShape>> shapes_;
   std::list<std::unique_ptr<frVia>> vias_;
@@ -233,81 +251,22 @@ class frNet : public frBlockObject
   std::list<std::unique_ptr<frNode>>
       nodes_;  // the nodes at the beginning of the list correspond to rpins
                // there is no guarantee that first element is root
-  frNode* root_;
-  frNode* rootGCellNode_;
-  frNode* firstNonRPinNode_;
+  frNode* root_{nullptr};
+  frNode* rootGCellNode_{nullptr};
+  frNode* firstNonRPinNode_{nullptr};
   std::vector<std::unique_ptr<frRPin>> rpins_;
   std::vector<std::unique_ptr<frGuide>> guides_;
-  dbSigType type_;
-  bool modified_;
-  bool isFakeNet_;  // indicate floating PG nets
-  frNonDefaultRule* ndr_;
-  int absPriorityLvl;  // absolute priority level: will be checked in net
-                       // ordering before other criteria
-  bool isClock_;
-  bool isSpecial_;
+  std::vector<frRect> orig_guides_;
+  dbSigType type_{dbSigType::SIGNAL};
+  bool modified_{false};
+  bool isFakeNet_{false};  // indicate floating PG nets
+  frNonDefaultRule* ndr_{nullptr};
+  int absPriorityLvl{0};  // absolute priority level: will be checked in net
+                          // ordering before other criteria
+  bool isClock_{false};
+  bool isSpecial_{false};
+  bool hasInitialRouting_{false};
 
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version);
-
-  frNet() = default;  // for serialization
-
-  friend class boost::serialization::access;
+  std::vector<frPinFig*> all_pinfigs_;
 };
-
-template <class Archive>
-void frNet::serialize(Archive& ar, const unsigned int version)
-{
-  // instTerms_ and terms_ are intentionally NOT serialized.  This cuts
-  // the serializer from recursing across the whole design.  Any
-  // instTerm/term must attach itself to a net on deserialization.
-
-  (ar) & boost::serialization::base_object<frBlockObject>(*this);
-  (ar) & name_;
-  (ar) & shapes_;
-  (ar) & vias_;
-  (ar) & pwires_;
-  // TODO for gr support
-  // (ar) & grShapes_;
-  // (ar) & grVias_;
-  (ar) & nodes_;
-  (ar) & root_;
-  (ar) & rootGCellNode_;
-  (ar) & firstNonRPinNode_;
-  (ar) & rpins_;
-  (ar) & guides_;
-  (ar) & type_;
-  (ar) & modified_;
-  (ar) & isFakeNet_;
-  (ar) & ndr_;
-  (ar) & absPriorityLvl;
-  (ar) & isClock_;
-  (ar) & isSpecial_;
-
-  // The list members can container an iterator representing their position
-  // in the list for fast removal.  It is tricky to serialize the iterator
-  // so just reset them from the list after loading.
-  if (is_loading(ar)) {
-    for (auto it = shapes_.begin(); it != shapes_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-    for (auto it = vias_.begin(); it != vias_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-    for (auto it = pwires_.begin(); it != pwires_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-    for (auto it = grShapes_.begin(); it != grShapes_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-    for (auto it = grVias_.begin(); it != grVias_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-    for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
-      (*it)->setIter(it);
-    }
-  }
-}
-}  // namespace fr
-
-#endif
+}  // namespace drt

@@ -99,6 +99,8 @@ namespace std {
   %template(DisplayControlMap) map<string, bool>;
 }
 
+%rename(pause) gui_pause;
+
 %inline %{
 
 bool enabled()
@@ -170,7 +172,8 @@ const std::string add_ruler(
   double x1, 
   double y1, 
   const std::string& label = "", 
-  const std::string& name = "")
+  const std::string& name = "",
+  bool euclidian = true)
 {
   if (!check_gui("add_ruler")) {
     return "";
@@ -178,7 +181,7 @@ const std::string add_ruler(
   odb::Point ll = make_point(x0, y0);
   odb::Point ur = make_point(x1, y1);
   auto gui = gui::Gui::get();
-  return gui->addRuler(ll.x(), ll.y(), ur.x(), ur.y(), label, name);  
+  return gui->addRuler(ll.x(), ll.y(), ur.x(), ur.y(), label, name, euclidian);
 }
 
 void delete_ruler(const std::string& name)
@@ -258,8 +261,7 @@ void design_created()
   if (!check_gui("design_created")) {
     return;
   }
-  auto gui = gui::Gui::get();
-  gui->load_design();
+  ord::OpenRoad::openRoad()->designCreated();
 }
 
 void fit()
@@ -271,10 +273,19 @@ void fit()
   gui->fit();
 }
 
-void save_image(const char* filename, double xlo, double ylo, double xhi, double yhi, double dbu_per_pixel = 0, const std::map<std::string, bool>& display_settings = {})
+void save_image(const char* filename, double xlo, double ylo, double xhi, double yhi, int width_px = 0, double dbu_per_pixel = 0, const std::map<std::string, bool>& display_settings = {})
 {
   auto gui = gui::Gui::get();
-  gui->saveImage(filename, make_rect(xlo, ylo, xhi, yhi), dbu_per_pixel, display_settings);
+  gui->saveImage(filename, make_rect(xlo, ylo, xhi, yhi), width_px, dbu_per_pixel, display_settings);
+}
+
+void save_clocktree_image(const char* filename, const char* clock_name, const char* corner = "", int width_px = 0, int height_px = 0)
+{
+  if (!check_gui("save_clocktree_image")) {
+    return;
+  }
+  auto gui = gui::Gui::get();
+  gui->saveClockTreeImage(clock_name, filename, corner, width_px, height_px);
 }
 
 void clear_rulers()
@@ -420,7 +431,9 @@ const std::string input_dialog(const char* title, const char* question)
   return gui->requestUserInput(title, question);
 }
 
-void pause(int timeout = 0)
+// glib has pause() so this is %rename'd to pause in the scripting
+// language to avoid conflicts in C++.
+void gui_pause(int timeout = 0)
 {
   if (!check_gui("pause")) {
     return;
@@ -543,13 +556,19 @@ int select_previous()
   return gui->selectPrevious();
 }
 
-int select(const std::string& type, const std::string& name_filter = "", bool case_sensitive = true, int highlight_group = -1)
+int select(const std::string& type,
+           const std::string& name_filter = "",
+           const std::string& attribute = "",
+           const std::string& value = "",
+           bool case_sensitive = true,
+           int highlight_group = -1)
 {
   if (!check_gui("select")) {
     return 0;
   }
+
   auto gui = gui::Gui::get();
-  return gui->select(type, name_filter, case_sensitive, highlight_group);
+  return gui->select(type, name_filter, attribute, value, case_sensitive, highlight_group);
 }
 
 void selection_animate(int repeat = 0)
@@ -561,22 +580,74 @@ void selection_animate(int repeat = 0)
   gui->animateSelection(repeat);
 }
 
+bool get_heatmap_bool(const std::string& name, const std::string& option)
+{
+  auto gui = gui::Gui::get();
+  auto value = gui->getHeatMapSetting(name, option);
+  if (std::holds_alternative<bool>(value)) {
+      return std::get<bool>(value);
+  } else {
+    auto logger = ord::OpenRoad::openRoad()->getLogger();
+    logger->error(GUI, 90, "Heatmap setting \"{}\" is not a boolean", option);
+  }
+  return false;
+}
+
+int get_heatmap_int(const std::string& name, const std::string& option)
+{
+  auto gui = gui::Gui::get();
+  auto value = gui->getHeatMapSetting(name, option);
+  if (std::holds_alternative<int>(value)) {
+      return std::get<int>(value);
+  } else {
+    auto logger = ord::OpenRoad::openRoad()->getLogger();
+    logger->error(GUI, 91, "Heatmap setting \"{}\" is not an integer", option);
+  }
+  return 0;
+}
+
+double get_heatmap_double(const std::string& name, const std::string& option)
+{
+  auto gui = gui::Gui::get();
+  auto value = gui->getHeatMapSetting(name, option);
+  if (std::holds_alternative<double>(value)) {
+      return std::get<double>(value);
+  } else {
+    auto logger = ord::OpenRoad::openRoad()->getLogger();
+    logger->error(GUI, 92, "Heatmap setting \"{}\" is not a double", option);
+  }
+  return 0.0;
+}
+
+const char* get_heatmap_string(const std::string& name, const std::string& option)
+{
+  auto gui = gui::Gui::get();
+  auto value = gui->getHeatMapSetting(name, option);
+  if (std::holds_alternative<std::string>(value)) {
+    return std::get<std::string>(value).c_str();
+  } else {
+    auto logger = ord::OpenRoad::openRoad()->getLogger();
+    logger->error(GUI, 93, "Heatmap setting \"{}\" is not a string", option);
+  }
+  return "";
+}
+
 void set_heatmap(const std::string& name, const std::string& option, double value = 0.0)
 {
-  if (!check_gui("set_heatmap")) {
-    return;
-  }
   auto gui = gui::Gui::get();
   gui->setHeatMapSetting(name, option, value);
 }
 
 void set_heatmap(const std::string& name, const std::string& option, const std::string& value)
 {
-  if (!check_gui("set_heatmap")) {
-    return;
-  }
   auto gui = gui::Gui::get();
   gui->setHeatMapSetting(name, option, value);
+}
+
+void dump_heatmap(const std::string& name, const std::string& file)
+{
+  auto gui = gui::Gui::get();
+  gui->dumpHeatMap(name, file);
 }
 
 void timing_cone(odb::dbITerm* iterm, bool fanin, bool fanout)
@@ -597,5 +668,45 @@ void timing_cone(odb::dbBTerm* bterm, bool fanin, bool fanout)
   gui->timingCone(bterm, fanin, fanout);
 }
 
-%} // inline
+void focus_net(odb::dbNet* net)
+{
+  if (!check_gui("focus_net")) {
+    return;
+  }
+  auto gui = gui::Gui::get();
+  gui->addFocusNet(net);
+}
 
+void remove_focus_net(odb::dbNet* net)
+{
+  if (!check_gui("remove_focus_net")) {
+    return;
+  }
+  auto gui = gui::Gui::get();
+  gui->removeFocusNet(net);
+}
+
+void clear_focus_nets()
+{
+  if (!check_gui("clear_focus_nets")) {
+    return;
+  }
+  auto gui = gui::Gui::get();
+  gui->clearFocusNets();
+}
+
+void trigger_action(const std::string& name)
+{
+  if (!check_gui("trigger_action")) {
+    return;
+  }
+  auto gui = gui::Gui::get();
+  gui->triggerAction(name);
+}
+
+bool supported()
+{
+  return true;
+}
+
+%} // inline

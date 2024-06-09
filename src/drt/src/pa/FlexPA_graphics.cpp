@@ -26,14 +26,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "FlexPA_graphics.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <limits>
 
 #include "FlexPA.h"
-#include "FlexPA_graphics.h"
 
-namespace fr {
+namespace drt {
 
 FlexPAGraphics::FlexPAGraphics(frDebugSettings* settings,
                                frDesign* design,
@@ -55,7 +56,7 @@ FlexPAGraphics::FlexPAGraphics(frDebugSettings* settings,
   layer_map_.resize(odb_tech->getLayerCount(), -1);
 
   for (auto& tr_layer : design->getTech()->getLayers()) {
-    auto odb_layer = odb_tech->findLayer(tr_layer->getName().c_str());
+    auto odb_layer = tr_layer->getDbLayer();
     if (odb_layer) {
       layer_map_[odb_layer->getNumber()] = tr_layer->getLayerNum();
     }
@@ -71,11 +72,20 @@ FlexPAGraphics::FlexPAGraphics(frDebugSettings* settings,
     size_t pos = settings_->pinName.rfind(':');
     if (pos == std::string::npos) {
       logger_->error(
-          DRT, 293, "pin name {} has no ':' delimeter", settings_->pinName);
+          DRT, 293, "pin name {} has no ':' delimiter", settings_->pinName);
     }
     term_name_ = settings_->pinName.substr(pos + 1);
     auto inst_name = settings_->pinName.substr(0, pos);
-    inst_ = design->getTopBlock()->getInst(inst_name);
+    logger_->info(
+        DRT, 4000, "DEBUGGING inst {} term {}", inst_name, term_name_);
+    if (inst_name == "PIN") {  // top level bterm
+      inst_ = nullptr;
+    } else {
+      inst_ = design->getTopBlock()->getInst(inst_name);
+      if (!inst_) {
+        logger_->warn(DRT, 5000, "INST NOT FOUND!");
+      }
+    }
   }
 
   gui_->registerRenderer(this);
@@ -109,9 +119,9 @@ void FlexPAGraphics::drawLayer(odb::dbTechLayer* layer, gui::Painter& painter)
     Rect bbox;
     bool skip = false;
     if (via_def->getLayer1Num() == layerNum) {
-      via->getLayer1BBox(bbox);
+      bbox = via->getLayer1BBox();
     } else if (via_def->getLayer2Num() == layerNum) {
-      via->getLayer2BBox(bbox);
+      bbox = via->getLayer2BBox();
     } else {
       skip = true;
     }
@@ -124,8 +134,7 @@ void FlexPAGraphics::drawLayer(odb::dbTechLayer* layer, gui::Painter& painter)
 
   for (auto seg : pa_segs_) {
     if (seg->getLayerNum() == layerNum) {
-      Rect bbox;
-      seg->getBBox(bbox);
+      Rect bbox = seg->getBBox();
       painter.setPen(layer, /* cosmetic */ true);
       painter.setBrush(layer);
       painter.drawRect({bbox.xMin(), bbox.yMin(), bbox.xMax(), bbox.yMax()});
@@ -137,9 +146,7 @@ void FlexPAGraphics::drawLayer(odb::dbTechLayer* layer, gui::Painter& painter)
     painter.setBrush(gui::Painter::transparent);
     for (auto& marker : *pa_markers_) {
       if (marker->getLayerNum() == layerNum) {
-        Rect bbox;
-        marker->getBBox(bbox);
-        painter.drawRect({bbox.xMin(), bbox.yMin(), bbox.xMax(), bbox.yMax()});
+        painter.drawRect(marker->getBBox());
       }
     }
   }
@@ -151,41 +158,61 @@ void FlexPAGraphics::drawLayer(odb::dbTechLayer* layer, gui::Painter& painter)
     auto color = ap.hasAccess() ? gui::Painter::green : gui::Painter::red;
     painter.setPen(color, /* cosmetic */ true);
 
-    Point pt = ap.getPoint();
-    painter.drawLine({pt.x() - 50, pt.y() - 50}, {pt.x() + 50, pt.y() + 50});
-    painter.drawLine({pt.x() - 50, pt.y() + 50}, {pt.x() + 50, pt.y() - 50});
+    const Point& pt = ap.getPoint();
+    painter.drawX(pt.x(), pt.y(), 50);
   }
 }
 
-void FlexPAGraphics::startPin(frPin* pin,
+void FlexPAGraphics::startPin(frMPin* pin,
                               frInstTerm* inst_term,
-                              set<frInst*, frBlockObjectComp>* instClass)
+                              std::set<frInst*, frBlockObjectComp>* instClass)
 {
   pin_ = nullptr;
 
-  frTerm* term = pin->getTerm();
-  std::string name = (inst_term ? inst_term->getInst()->getName() : "") + ':'
-                     + term->getName();
+  frMTerm* term = pin->getTerm();
   if (!settings_->pinName.empty()) {
     if (term_name_ != "*" && term->getName() != term_name_) {
       return;
     }
-    if (inst_term == nullptr
-        || (inst_term && instClass->find(inst_) == instClass->end())) {
+    if (instClass->find(inst_) == instClass->end()) {
       return;
     }
   }
 
+  const std::string name
+      = inst_term->getInst()->getName() + ':' + term->getName();
   status("Start pin: " + name);
   pin_ = pin;
   inst_term_ = inst_term;
 
-  if (inst_term) {
-    Rect box;
-    inst_term->getInst()->getBBox(box);
-    gui_->zoomTo({box.xMin(), box.yMin(), box.xMax(), box.yMax()});
-    gui_->pause();
+  gui_->zoomTo(inst_term->getInst()->getBBox());
+  gui_->pause();
+}
+
+void FlexPAGraphics::startPin(frBPin* pin,
+                              frInstTerm* inst_term,
+                              std::set<frInst*, frBlockObjectComp>* instClass)
+{
+  pin_ = nullptr;
+
+  frBTerm* term = pin->getTerm();
+  if (!settings_->pinName.empty()) {
+    if (inst_ != nullptr) {
+      return;
+    }
+    if (term_name_ != "*" && term->getName() != term_name_) {
+      return;
+    }
   }
+
+  const std::string name = "PIN:" + term->getName();
+  status("Start pin: " + name);
+  pin_ = pin;
+  inst_term_ = nullptr;
+
+  Rect box = term->getBBox();
+  gui_->zoomTo({box.xMin(), box.yMin(), box.xMax(), box.yMax()});
+  gui_->pause();
 }
 
 static const char* to_string(frAccessPointEnum e)
@@ -216,7 +243,7 @@ void FlexPAGraphics::setAPs(
 
   // We make a copy of the aps
   for (auto& ap : aps) {
-    aps_.emplace_back(*ap.get());
+    aps_.emplace_back(*ap);
   }
   status("add " + std::to_string(aps.size()) + " ( " + to_string(lower_type)
          + " / " + to_string(upper_type) + " ) "
@@ -240,8 +267,7 @@ void FlexPAGraphics::setViaAP(
   pa_segs_.clear();
   pa_markers_ = &markers;
   for (auto& marker : markers) {
-    Rect bbox;
-    marker->getBBox(bbox);
+    Rect bbox = marker->getBBox();
     logger_->info(DRT,
                   119,
                   "Marker ({}, {}) ({}, {}) on {}:",
@@ -276,8 +302,7 @@ void FlexPAGraphics::setPlanarAP(
   pa_segs_ = {seg};
   pa_markers_ = &markers;
   for (auto& marker : markers) {
-    Rect bbox;
-    marker->getBBox(bbox);
+    Rect bbox = marker->getBBox();
     logger_->info(DRT,
                   292,
                   "Marker {} at ({}, {}) ({}, {}).",
@@ -298,10 +323,13 @@ void FlexPAGraphics::setPlanarAP(
 }
 
 void FlexPAGraphics::setObjsAndMakers(
-    const vector<pair<frConnFig*, frBlockObject*>>& objs,
-    const std::vector<std::unique_ptr<frMarker>>& markers)
+    const std::vector<std::pair<frConnFig*, frBlockObject*>>& objs,
+    const std::vector<std::unique_ptr<frMarker>>& markers,
+    const FlexPA::PatternType type)
 {
-  if (!settings_->paCombining) {
+  if ((!settings_->paCommit && !settings_->paEdge)
+      || (settings_->paCommit && type != FlexPA::Commit)
+      || (settings_->paEdge && type != FlexPA::Edge)) {
     return;
   }
 
@@ -318,8 +346,7 @@ void FlexPAGraphics::setObjsAndMakers(
   }
   pa_markers_ = &markers;
   for (auto& marker : markers) {
-    Rect bbox;
-    marker->getBBox(bbox);
+    Rect bbox = marker->getBBox();
     logger_->info(DRT,
                   281,
                   "Marker {} at ({}, {}) ({}, {}).",
@@ -350,4 +377,4 @@ bool FlexPAGraphics::guiActive()
   return gui::Gui::enabled();
 }
 
-}  // namespace fr
+}  // namespace drt

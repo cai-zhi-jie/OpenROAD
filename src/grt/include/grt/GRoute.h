@@ -34,12 +34,14 @@
 
 #pragma once
 
-#include "odb/db.h"
-#include "odb/geom.h"
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <set>
+#include <vector>
 
 namespace odb {
 class dbNet;
-class Rect;
 }  // namespace odb
 
 namespace grt {
@@ -55,23 +57,18 @@ struct GSegment
   int final_y;
   int final_layer;
   GSegment() = default;
-  GSegment(int x0, int y0, int l0, int x1, int y1, int l1)
+  GSegment(int x0, int y0, int l0, int x1, int y1, int l1);
+  bool isVia() const { return (init_x == final_x && init_y == final_y); }
+  int length()
   {
-    init_x = std::min(x0, x1);
-    init_y = std::min(y0, y1);
-    init_layer = l0;
-    final_x = std::max(x0, x1);
-    final_y = std::max(y0, y1);
-    final_layer = l1;
+    return std::abs(init_x - final_x) + std::abs(init_y - final_y);
   }
-  bool isVia() { return (init_x == final_x && init_y == final_y); }
-  bool operator==(const GSegment& segment) const
-  {
-    return (init_layer == segment.init_layer
-            && final_layer == segment.final_layer && init_x == segment.init_x
-            && init_y == segment.init_y && final_x == segment.final_x
-            && final_y == segment.final_y);
-  }
+  bool operator==(const GSegment& segment) const;
+};
+
+struct GSegmentHash
+{
+  std::size_t operator()(const GSegment& seg) const;
 };
 
 class Capacities
@@ -96,11 +93,37 @@ class Capacities
 
 struct cmpById
 {
-  bool operator()(odb::dbNet* net1, odb::dbNet* net2) const
-  {
-    return net1->getId() < net2->getId();
-  }
+  bool operator()(odb::dbNet* net1, odb::dbNet* net2) const;
 };
+
+struct TileCongestion
+{
+  int capacity;
+  int usage;
+};
+
+struct TileInformation
+{
+  std::set<odb::dbNet*, cmpById> nets;
+  TileCongestion congestion;
+};
+
+using NetsPerCongestedArea = std::map<std::pair<int, int>, TileInformation>;
+
+struct CongestionInformation
+{
+  GSegment segment;
+  TileCongestion congestion;
+  std::set<odb::dbNet*, cmpById> sources;
+};
+
+struct CapacityReduction
+{
+  uint8_t capacity = 0;
+  uint8_t reduction = 0;
+};
+
+using CapacityReductionData = std::vector<std::vector<CapacityReduction>>;
 
 // class Route is defined in fastroute core.
 typedef std::vector<GSegment> GRoute;

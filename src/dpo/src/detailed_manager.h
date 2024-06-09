@@ -41,12 +41,11 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Includes.
 ////////////////////////////////////////////////////////////////////////////////
-#include <deque>
+#include <memory>
 #include <vector>
-#include "architecture.h"
+
 #include "network.h"
 #include "rectangle.h"
-#include "router.h"
 #include "utility.h"
 
 namespace utl {
@@ -62,7 +61,10 @@ namespace dpo {
 ////////////////////////////////////////////////////////////////////////////////
 // Forward declarations.
 ////////////////////////////////////////////////////////////////////////////////
+class Architecture;
 class DetailedSeg;
+class Network;
+class RoutingParams;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Classes.
@@ -70,135 +72,226 @@ class DetailedSeg;
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-class DetailedMgr {
+class DetailedMgr
+{
  public:
   DetailedMgr(Architecture* arch, Network* network, RoutingParams* rt);
   virtual ~DetailedMgr();
 
   void cleanup();
 
-  Architecture* getArchitecture() const { return m_arch; }
-  Network* getNetwork() const { return m_network; }
-  RoutingParams* getRoutingParams() const { return m_rt; }
+  Architecture* getArchitecture() const { return arch_; }
+  Network* getNetwork() const { return network_; }
+  RoutingParams* getRoutingParams() const { return rt_; }
 
-  void setLogger(utl::Logger* logger) { m_logger = logger; }
-  utl::Logger* getLogger() const { return m_logger; }
+  void setLogger(utl::Logger* logger) { logger_ = logger; }
+  utl::Logger* getLogger() const { return logger_; }
 
-  void setSeed(int seed);
+  void setSeed(int s);
 
-  void internalError( std::string msg );
+  void setMaxDisplacement(int x, int y);
+  void setDisallowOneSiteGaps(bool disallowOneSiteGaps);
+  void getMaxDisplacement(int& x, int& y) const
+  {
+    x = maxDispX_;
+    y = maxDispY_;
+  }
+  int getMaxDisplacementX() const { return maxDispX_; }
+  int getMaxDisplacementY() const { return maxDispY_; }
+  bool getDisallowOneSiteGaps() const { return disallowOneSiteGaps_; }
+  double measureMaximumDisplacement(double& maxX,
+                                    double& maxY,
+                                    int& violatedX,
+                                    int& violatedY);
+
+  void internalError(const std::string& msg);
 
   void setupObstaclesForDrc();
 
   void findBlockages(bool includeRouteBlockages = true);
   void findRegionIntervals(
       int regId,
-      std::vector<std::vector<std::pair<double, double> > >& intervals);
+      std::vector<std::vector<std::pair<double, double>>>& intervals);
 
   void findSegments();
-  DetailedSeg* findClosestSegment(Node* nd);
+  DetailedSeg* findClosestSegment(const Node* nd);
   void findClosestSpanOfSegmentsDfs(
-      Node* ndi, DetailedSeg* segPtr, double xmin, double xmax, int bot,
-      int top, std::vector<DetailedSeg*>& stack,
-      std::vector<std::vector<DetailedSeg*> >& candidates);
+      const Node* ndi,
+      DetailedSeg* segPtr,
+      double xmin,
+      double xmax,
+      int bot,
+      int top,
+      std::vector<DetailedSeg*>& stack,
+      std::vector<std::vector<DetailedSeg*>>& candidates);
   bool findClosestSpanOfSegments(Node* nd, std::vector<DetailedSeg*>& segments);
-
-  void assignCellsToSegments(std::vector<Node*>& nodesToConsider);
-  int checkSegments(double& worst);
+  bool isInsideABlockage(const Node* nd, double position);
+  void assignCellsToSegments(const std::vector<Node*>& nodesToConsider);
   int checkOverlapInSegments();
   int checkEdgeSpacingInSegments();
   int checkSiteAlignment();
-  int checkRowAlignment(int max_err_n = 0);
+  int checkRowAlignment();
   int checkRegionAssignment();
-
-  void removeCellFromSegmentTest(Node* nd, int seg, double& util, double& gapu);
-  void addCellToSegmentTest(Node* nd, int seg, double x, double& util,
-                            double& gapu);
-  void removeCellFromSegment(Node* nd, int seg);
+  void getOneSiteGapViolationsPerSegment(
+      std::vector<std::vector<int>>& violating_cells,
+      bool fix_violations);
+  bool fixOneSiteGapViolations(Node* cell,
+                               int one_site_gap,
+                               int newX,
+                               int segment,
+                               Node* violatingNode);
+  void removeCellFromSegment(const Node* nd, int seg);
   void addCellToSegment(Node* nd, int seg);
-  double getCellSpacing(Node* ndl, Node* ndr, bool checkPinsOnCells);
+  double getCellSpacing(const Node* ndl,
+                        const Node* ndr,
+                        bool checkPinsOnCells);
 
   void collectSingleHeightCells();
   void collectMultiHeightCells();
-  void moveMultiHeightCellsToFixed();
   void collectFixedCells();
   void collectWideCells();
 
   void restoreOriginalPositions();
   void recordOriginalPositions();
-  void restoreOriginalDimensions();
-  void recordOriginalDimensions();
-
-  void restoreBestPositions();
-  void recordBestPositions();
 
   void resortSegments();
   void resortSegment(DetailedSeg* segPtr);
   void removeAllCellsFromSegments();
 
-  double getOrigX(Node* nd) const { return m_origX[nd->getId()]; }
-  double getOrigY(Node* nd) const { return m_origY[nd->getId()]; }
-  double getOrigW(Node* nd) const { return m_origW[nd->getId()]; }
-  double getOrigH(Node* nd) const { return m_origH[nd->getId()]; }
+  int getNumSegments() const { return static_cast<int>(segments_.size()); }
+  DetailedSeg* getSegment(int s) const { return segments_[s]; }
+  int getNumSingleHeightRows() const { return numSingleHeightRows_; }
+  int getSingleRowHeight() const { return singleRowHeight_; }
 
-  bool isNodeAlignedToRow(Node* nd);
-
-  double measureMaximumDisplacement(bool& violated);
-  void removeOverlapMinimumShift();
-
-  size_t getNumSegments() const { return m_segments.size(); }
-  DetailedSeg* getSegment(int s) const { return m_segments[s]; }
-  int getNumSingleHeightRows() const {
-    return m_numSingleHeightRows;
+  int getNumCellsInSeg(int segId) const { return cellsInSeg_[segId].size(); }
+  const std::vector<Node*>& getCellsInSeg(int segId) const
+  {
+    return cellsInSeg_[segId];
   }
-  int getSingleRowHeight() const { return m_singleRowHeight; }
+  void addToFrontCellsInSeg(int segId, Node* node)
+  {
+    cellsInSeg_[segId].insert(cellsInSeg_[segId].begin(), node);
+  }
+  void addToBackCellsInSeg(int segId, Node* node)
+  {
+    cellsInSeg_[segId].push_back(node);
+  }
+  void popFrontCellsInSeg(int segId)
+  {
+    cellsInSeg_[segId].erase(cellsInSeg_[segId].begin());
+  }
+  void popBackCellsInSeg(int segId) { cellsInSeg_[segId].pop_back(); }
+  void sortCellsInSeg(int segId)
+  {
+    std::sort(cellsInSeg_[segId].begin(),
+              cellsInSeg_[segId].end(),
+              DetailedMgr::compareNodesX());
+  }
+  void sortCellsInSeg(int segId, int start, int end)
+  {
+    std::sort(cellsInSeg_[segId].begin() + start,
+              cellsInSeg_[segId].begin() + end,
+              DetailedMgr::compareNodesX());
+  }
 
-  void getSpaceAroundCell(int seg, int ix, double& space, double& larger,
+  int getNumSegsInRow(int rowId) const { return segsInRow_[rowId].size(); }
+  const std::vector<DetailedSeg*>& getSegsInRow(int rowId) const
+  {
+    return segsInRow_[rowId];
+  }
+
+  int getNumReverseCellToSegs(int nodeId) const
+  {
+    return reverseCellToSegs_[nodeId].size();
+  }
+  const std::vector<DetailedSeg*>& getReverseCellToSegs(int nodeId) const
+  {
+    return reverseCellToSegs_[nodeId];
+  }
+
+  const std::vector<Node*>& getSingleHeightCells() const
+  {
+    return singleHeightCells_;
+  }
+
+  int getNumMultiHeights() const { return multiHeightCells_.size(); }
+  const std::vector<Node*>& getMultiHeightCells(int height) const
+  {
+    return multiHeightCells_[height];
+  }
+  const std::vector<Node*>& getWideCells() const { return wideCells_; }
+
+  void shuffle(std::vector<Node*>& nodes);
+  int getRandom(int limit) const { return (*rng_)() % limit; }
+
+  const std::vector<int>& getCurLeft() const { return curLeft_; }
+  const std::vector<int>& getCurBottom() const { return curBottom_; }
+  const std::vector<unsigned>& getCurOri() const { return curOri_; }
+  const std::vector<int>& getNewLeft() const { return newLeft_; }
+  const std::vector<int>& getNewBottom() const { return newBottom_; }
+  const std::vector<unsigned>& getNewOri() const { return newOri_; }
+  const std::vector<Node*>& getMovedNodes() const { return movedNodes_; }
+  int getNMoved() const { return nMoved_; }
+
+  void getSpaceAroundCell(int seg,
+                          int ix,
+                          double& space,
+                          double& larger,
                           int limit = 3);
-  void getSpaceAroundCell(int seg, int ix, double& space_left,
-                          double& space_right, double& large_left,
-                          double& large_right, int limit = 3);
-
-  bool fixSegments();
-  void moveCellsBetweenSegments(int iteration);
-  void pushCellsBetweenSegments(int iteration);
-  void moveCellsBetweenSegments(DetailedSeg* segment, int leftRightTol,
-                                double offsetTol, double scoringTol);
+  void getSpaceAroundCell(int seg,
+                          int ix,
+                          double& space_left,
+                          double& space_right,
+                          double& large_left,
+                          double& large_right,
+                          int limit = 3);
 
   void removeSegmentOverlapSingle(int regId = -1);
-  void removeSegmentOverlapSingleInner(std::vector<Node*>& nodes, double l,
-                                       double r, int rowId);
+  void removeSegmentOverlapSingleInner(std::vector<Node*>& nodes,
+                                       int l,
+                                       int r,
+                                       int rowId);
 
-  void debugSegments();
+  double getTargetUt() const { return targetUt_; }
+  void setTargetUt(double ut) { targetUt_ = ut; }
 
-  double getTargetUt() const { return m_targetUt; }
-  void setTargetUt(double ut) { m_targetUt = ut; }
+  // Routines for generating moves and swaps.
+  bool tryMove(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
+  bool trySwap(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
 
-  double getMaxMovement() const { return m_targetMaxMovement; }
-  void setTargetMaxMovement(double movement) { m_targetMaxMovement = movement; }
-
-  bool alignPos(Node* ndi, double& xi, double xl, double xr);
-  bool shift(std::vector<Node*>& cells, std::vector<double>& tarX,
-             std::vector<double>& posX, double left, double right, int segId,
-             int rowId);
-
-  bool tryMove1(Node* ndi, double xi, double yi, int si, double xj, double yj,
-                int sj);
-  bool tryMove2(Node* ndi, double xi, double yi, int si, double xj, double yj,
-                int sj);
-  bool tryMove3(Node* ndi, double xi, double yi, int si, double xj, double yj,
-                int sj);
-
-  bool trySwap1(Node* ndi, double xi, double yi, int si, double xj, double yj,
-                int sj);
-
+  // For accepting or rejecting moves and swaps.
   void acceptMove();
   void rejectMove();
 
- public:
-  struct compareBlockages {
+  // For help aligning cells to sites.
+  bool alignPos(const Node* ndi, int& xi, int xl, int xr);
+  int getMoveLimit() { return moveLimit_; }
+  void setMoveLimit(unsigned int newMoveLimit) { moveLimit_ = newMoveLimit; }
+
+  struct compareNodesX
+  {
+    // Needs cell centers.
+    bool operator()(Node* p, Node* q) const
+    {
+      return p->getLeft() + 0.5 * p->getWidth()
+             < q->getLeft() + 0.5 * q->getWidth();
+    }
+    bool operator()(Node*& s, double i) const
+    {
+      return s->getLeft() + 0.5 * s->getWidth() < i;
+    }
+    bool operator()(double i, Node*& s) const
+    {
+      return i < s->getLeft() + 0.5 * s->getWidth();
+    }
+  };
+
+ private:
+  struct compareBlockages
+  {
     bool operator()(std::pair<double, double> i1,
-                    std::pair<double, double> i2) const {
+                    std::pair<double, double> i2) const
+    {
       if (i1.first == i2.first) {
         return i1.second < i2.second;
       }
@@ -206,84 +299,111 @@ class DetailedMgr {
     }
   };
 
-  struct compareNodesX {
-    bool operator()(Node* p, Node* q) const {
-      return p->getX() < q->getX();
-    }
-    bool operator()(Node*& s, double i) const { return s->getX() < i; }
-    bool operator()(double i, Node*& s) const { return i < s->getX(); }
-  };
-
-  struct compareNodesL {
-    bool operator()(Node* p, Node* q) const {
-      return p->getX() - 0.5 * p->getWidth() < q->getX() - 0.5 * q->getWidth();
+  struct compareNodesL
+  {
+    bool operator()(Node* p, Node* q) const
+    {
+      return p->getLeft() < q->getLeft();
     }
   };
 
- protected:
+  // Different routines for trying moves and swaps.
+  bool tryMove1(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
+  bool tryMove2(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
+  bool tryMove3(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
+
+  bool trySwap1(Node* ndi, int xi, int yi, int si, int xj, int yj, int sj);
+
+  // Helper routines for making moves and swaps.
+  bool shift(std::vector<Node*>& cells,
+             std::vector<int>& targetLeft,
+             std::vector<int>& posLeft,
+             int leftLimit,
+             int rightLimit,
+             int segId,
+             int rowId);
+  bool shiftRightHelper(Node* ndi, int xj, int sj, Node* ndr);
+  bool shiftLeftHelper(Node* ndi, int xj, int sj, Node* ndl);
+  void getSpaceToLeftAndRight(int seg, int ix, double& left, double& right);
+
+  // For composing list of cells for moves or swaps.
+  void clearMoveList();
+  bool addToMoveList(Node* ndi,
+                     int curLeft,
+                     int curBottom,
+                     int curSeg,
+                     int newLeft,
+                     int newBottom,
+                     int newSeg);
+  bool addToMoveList(Node* ndi,
+                     int curLeft,
+                     int curBottom,
+                     const std::vector<int>& curSegs,
+                     int newLeft,
+                     int newBottom,
+                     const std::vector<int>& newSegs);
+
   // Standard stuff.
-  Architecture* m_arch;
-  Network* m_network;
-  RoutingParams* m_rt;
+  Architecture* arch_;
+  Network* network_;
+  RoutingParams* rt_;
 
   // For output.
-  utl::Logger* m_logger;
+  utl::Logger* logger_ = nullptr;
 
   // Info about rows.
-  int m_numSingleHeightRows;
-  double m_singleRowHeight;
+  int numSingleHeightRows_;
+  int singleRowHeight_;
 
   // Generic place for utilization.
-  double m_targetUt;
-  double m_targetMaxMovement;
+  double targetUt_;
 
-  std::vector<Node*> m_fixedCells;   // Fixed; filler, macros, temporary, etc.
+  // Target displacement limits.
+  int maxDispX_;
+  int maxDispY_;
+  bool disallowOneSiteGaps_;
+  std::vector<Node*> fixedCells_;  // Fixed; filler, macros, temporary, etc.
 
- public:
   // Blockages and segments.
-  std::vector<std::vector<std::pair<double, double> > > m_blockages;
-  std::vector<std::vector<Node*> > m_cellsInSeg;
-  std::vector<std::vector<DetailedSeg*> > m_segsInRow;
-  std::vector<DetailedSeg*> m_segments;
-  std::vector<std::vector<DetailedSeg*> > m_reverseCellToSegs;
+  std::vector<std::vector<std::pair<double, double>>> blockages_;
+  std::vector<std::vector<Node*>> cellsInSeg_;
+  std::vector<std::vector<DetailedSeg*>> segsInRow_;
+  std::vector<DetailedSeg*> segments_;
+  // size == #nodes
+  std::vector<std::vector<DetailedSeg*>> reverseCellToSegs_;
 
   // For short and pin access stuff...
-  std::vector<std::vector<std::vector<Rectangle> > > m_obstacles;
+  std::vector<std::vector<std::vector<Rectangle>>> obstacles_;
 
   // Random number generator.
-  Placer_RNG* m_rng;
+  std::unique_ptr<Placer_RNG> rng_;
 
-  // Info about cells.
-  std::vector<Node*> m_singleHeightCells;  // Single height cells.
-  std::vector<std::vector<Node*> >
-      m_multiHeightCells;            // Multi height cells by height.
-  std::vector<Node*> m_fixedMacros;  // Fixed; only macros.
-  std::vector<Node*>
-      m_wideCells;  // Wide movable cells.  Can be single of multi.
+  // Info about cells:
+  // Single height cells.
+  std::vector<Node*> singleHeightCells_;
+  // Multi height cells by height.
+  std::vector<std::vector<Node*>> multiHeightCells_;
+  // Wide movable cells.  Can be single or multi height.
+  std::vector<Node*> wideCells_;
 
-  // Info about original cell positions and dimensions.
-  std::vector<double> m_origX;
-  std::vector<double> m_origY;
-  std::vector<double> m_origW;
-  std::vector<double> m_origH;
+  // Original cell positions.
+  std::vector<int> origBottom_;
+  std::vector<int> origLeft_;
 
-  std::vector<double> m_bestX;
-  std::vector<double> m_bestY;
+  std::vector<Rectangle> boxes_;
 
-  std::vector<Rectangle> m_boxes;
-
-  // For generating a move list...
-  std::vector<double> m_curX;
-  std::vector<double> m_curY;
-  std::vector<double> m_newX;
-  std::vector<double> m_newY;
-  std::vector<unsigned> m_curOri;
-  std::vector<unsigned> m_newOri;
-  std::vector<std::vector<int> > m_curSeg;
-  std::vector<std::vector<int> > m_newSeg;
-  std::vector<Node*> m_movedNodes;
-  int m_nMoved;
-  int m_moveLimit;
+  // For generating a move list... (size = moveLimit_)
+  std::vector<int> curLeft_;
+  std::vector<int> curBottom_;
+  std::vector<int> newLeft_;
+  std::vector<int> newBottom_;
+  std::vector<unsigned> curOri_;
+  std::vector<unsigned> newOri_;
+  std::vector<std::vector<int>> curSeg_;
+  std::vector<std::vector<int>> newSeg_;
+  std::vector<Node*> movedNodes_;
+  int nMoved_;
+  int moveLimit_;
 };
 
 }  // namespace dpo

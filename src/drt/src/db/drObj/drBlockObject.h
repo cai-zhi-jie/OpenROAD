@@ -26,24 +26,16 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _DR_BLOCKOBJECT_H_
-#define _DR_BLOCKOBJECT_H_
+#pragma once
 
 #include "db/obj/frBlockObject.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
+
 class drBlockObject : public frBlockObject
 {
- public:
-  virtual ~drBlockObject() {}
-  // getters
-  // setters
-  // others
  protected:
-  // constructors
-  drBlockObject() {}
-  
   template <class Archive>
   void serialize(Archive& ar, const unsigned int version)
   {
@@ -52,6 +44,5 @@ class drBlockObject : public frBlockObject
 
   friend class boost::serialization::access;
 };
-}  // namespace fr
 
-#endif
+}  // namespace drt

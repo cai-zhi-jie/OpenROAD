@@ -26,20 +26,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _FR_FLEXGC_H_
-#define _FR_FLEXGC_H_
+#pragma once
 
 #include <memory>
 
 #include "frDesign.h"
 
-namespace fr {
+namespace drt {
 class drNet;
 class drPatchWire;
 class FlexDRWorker;
 class gcNet;
 class gcPin;
-
 
 class FlexGCWorker
 {
@@ -55,10 +53,12 @@ class FlexGCWorker
   bool setTargetNet(frBlockObject* in);
   gcNet* getTargetNet();
   void resetTargetNet();
-  void setTargetObj(frBlockObject* in);
+  void addTargetObj(frBlockObject* in);
+  void setTargetObjs(const std::set<frBlockObject*>& targetObjs);
   void setIgnoreDB();
   void setIgnoreMinArea();
   void setIgnoreLongSideEOL();
+  void setIgnoreCornerSpacing();
   void setEnableSurgicalFix(bool in);
   void addPAObj(frConnFig* obj, frBlockObject* owner);
   // getters
@@ -71,6 +71,7 @@ class FlexGCWorker
   void init(const frDesign* design);
   int main();
   void end();
+  void clearPWires();
   // initialization from FlexPA, initPA0 --> addPAObj --> initPA1
   void initPA0(const frDesign* design);
   void initPA1();
@@ -78,17 +79,21 @@ class FlexGCWorker
   // used in rp_prep
   void checkMinStep(gcPin* pin);
   void updateGCWorker();
+
  private:
   class Impl;
   std::unique_ptr<Impl> impl_;
-
-  FlexGCWorker(); // for serialization
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version);
-
-  friend class boost::serialization::access;
 };
-}  // namespace fr
-
-#endif
+struct MarkerId
+{
+  Rect box;
+  frLayerNum lNum;
+  frConstraint* con;
+  std::set<frBlockObject*> srcs;
+  bool operator<(const MarkerId& rhs) const
+  {
+    return std::tie(box, lNum, con, srcs)
+           < std::tie(rhs.box, rhs.lNum, rhs.con, rhs.srcs);
+  }
+};
+}  // namespace drt

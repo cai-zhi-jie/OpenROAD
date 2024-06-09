@@ -31,22 +31,20 @@
 #include "db.h"
 #include "dbShape.h"
 #include "dbViaParams.h"
-#include "dbRtEdge.h"
 #include "dbWireCodec.h"
 #include "dbBlockCallBackObj.h"
 #include "dbIterator.h"
-#include "dbRtNode.h"
 #include "dbTransform.h"
 #include "dbWireGraph.h"
 #include "dbBlockSet.h"
 #include "dbNetSet.h"
 #include "dbMap.h"
-#include "dbRtTree.h"
 #include "dbCCSegSet.h"
 #include "dbSet.h"
 #include "dbTypes.h"
 #include "geom.h"
 #include "wOrder.h"
+#include "util.h"
 
 using namespace odb;
 %}
@@ -69,28 +67,36 @@ using namespace odb;
 %ignore odb::dbTechLayerAntennaRule::getDiffCSR() const;
 %ignore odb::dbTechLayerAntennaRule::getAreaDiffReduce() const;
 
+// Swig can't handle non-assignable types
+%ignore odb::Point::get(Orientation2D orient) const;
+%ignore odb::Rect::low(Orientation2D orient) const;
+%ignore odb::Rect::high(Orientation2D orient) const;
+%ignore odb::Rect::get(Orientation2D orient, Direction1D dir) const;
+%ignore odb::Rect::set(Orientation2D orient, Direction1D dir, int value);
+%ignore odb::Point::set(Orientation2D orient, int value);
+%ignore odb::Rect::bloat(int margin, Orientation2D orient) const;
+
 %include "dbenums.i"
 %include "parserenums.i"
 %include "dbtypes.i"
 %include "dbtypes_common.i"
 
 %include "odb/geom.h"
-%include "odb/db.h"
 %include "polygon.i"
+%include "odb/db.h"
 
 %include "dbhelpers.i"  
 %include "dbdiff.i"
 
 %include "odb/dbViaParams.h"
-%include "odb/dbRtEdge.h"
 %include "odb/dbWireCodec.h"
 %include "odb/dbBlockCallBackObj.h"
 %include "odb/dbIterator.h"
-%include "odb/dbRtNode.h"
 %include "odb/dbTransform.h"
 %include "odb/dbWireGraph.h"
 %include "odb/dbBlockSet.h"
 %include "odb/dbNetSet.h"
-%include "odb/dbRtTree.h"
 %include "odb/dbCCSegSet.h"
 %include "odb/wOrder.h"
+
+std::string generateMacroPlacementString(odb::dbBlock* block);

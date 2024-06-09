@@ -1,6 +1,7 @@
 %{
 #include "ord/OpenRoad.hh"
 #include "gpl/Replace.h"
+#include "odb/db.h"
 
 namespace ord {
 OpenRoad*
@@ -26,10 +27,6 @@ replace_reset_cmd()
 {
   Replace* replace = getReplace();  
   replace->reset();
-  replace->setDb(getOpenRoad()->getDb());
-  replace->setLogger(getOpenRoad()->getLogger());
-  replace->setGlobalRouter(getOpenRoad()->getGlobalRouter());
-  replace->setResizer(getOpenRoad()->getResizer());
 }
 
 void 
@@ -43,8 +40,19 @@ void
 replace_nesterov_place_cmd()
 {
   Replace* replace = getReplace();
-  replace->doNesterovPlace();
+  int threads = ord::OpenRoad::openRoad()->getThreadCount();
+  replace->doNesterovPlace(threads);
 }
+
+
+void
+replace_run_mbff_cmd(int max_sz, float alpha, float beta, int num_paths) 
+{
+  Replace* replace = getReplace();
+  int threads = ord::OpenRoad::openRoad()->getThreadCount();
+  replace->runMBFF(max_sz, alpha, beta, threads, num_paths);   
+}
+
 
 void
 set_density_cmd(float density)
@@ -82,17 +90,10 @@ set_nesv_place_iter_cmd(int iter)
 }
 
 void
-set_bin_grid_cnt_x_cmd(int cnt_x)
+set_bin_grid_cnt_cmd(int cnt_x, int cnt_y)
 {
   Replace* replace = getReplace();
-  replace->setBinGridCntX(cnt_x); 
-}
-
-void
-set_bin_grid_cnt_y_cmd(int cnt_y)
-{
-  Replace* replace = getReplace();
-  replace->setBinGridCntY(cnt_y);
+  replace->setBinGridCnt(cnt_x, cnt_y);
 }
 
 void
@@ -141,22 +142,24 @@ void
 replace_incremental_place_cmd()
 {
   Replace* replace = getReplace();
-  replace->doIncrementalPlace();
+  int threads = ord::OpenRoad::openRoad()->getThreadCount();
+  replace->doIncrementalPlace(threads);
 }
 
+
 void
-set_verbose_level_cmd(int verbose)
+set_force_cpu(bool force_cpu)
 {
   Replace* replace = getReplace();
-  replace->setVerboseLevel(verbose);
+  replace->setForceCPU(force_cpu);
 }
 
-void
-set_timing_driven_mode(bool timing_driven)
+void set_timing_driven_mode(bool timing_driven)
 {
   Replace* replace = getReplace();
   replace->setTimingDrivenMode(timing_driven);
 }
+
 
 void
 set_routability_driven_mode(bool routability_driven)
@@ -239,11 +242,19 @@ set_pad_right_cmd(int pad)
   replace->setPadRight(pad);
 }
 
+void
+set_skip_io_mode_cmd(bool mode) 
+{
+  Replace* replace = getReplace();
+  replace->setSkipIoMode(mode);
+}
+
 float
 get_global_placement_uniform_density_cmd() 
 {
   Replace* replace = getReplace();
-  return replace->getUniformTargetDensity();
+  int threads = ord::OpenRoad::openRoad()->getThreadCount();
+  return replace->getUniformTargetDensity(threads);
 }
 
 void 
@@ -254,21 +265,29 @@ add_timing_net_reweight_overflow_cmd(int overflow)
 }
 
 void
+set_timing_driven_net_weight_max_cmd(float max)
+{
+  Replace* replace = getReplace();
+  return replace->setTimingNetWeightMax(max);
+}
+
+
+
+void
 set_debug_cmd(int pause_iterations,
               int update_iterations,
               bool draw_bins,
-              bool initial)
+              bool initial,
+              const char* inst_name)
 {
   Replace* replace = getReplace();
+  odb::dbInst* inst = nullptr;
+  if (inst_name) {
+    auto block = ord::OpenRoad::openRoad()->getDb()->getChip()->getBlock();
+    inst = block->findInst(inst_name);
+  }
   replace->setDebug(pause_iterations, update_iterations, draw_bins,
-                    initial);
-}
-
-void
-set_plot_path_cmd(const char* path) 
-{
-  Replace* replace = getReplace();
-  replace->setPlottingPath(path);
+                    initial, inst);
 }
 
 %} // inline

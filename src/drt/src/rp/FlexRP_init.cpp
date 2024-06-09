@@ -26,44 +26,33 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <iostream>
-#include <sstream>
-
 #include "FlexRP.h"
-#include "db/infra/frTime.h"
 #include "frProfileTask.h"
-#include "gc/FlexGC.h"
 
-using namespace std;
-using namespace fr;
+namespace drt {
 
 void FlexRP::init()
 {
   ProfileTask profile("RP:init");
 
-  vector<pair<frCoord, frCoord>> forbiddenRanges;
-  vector<vector<pair<frCoord, frCoord>>> eightForbiddenRanges(8,
-                                                              forbiddenRanges);
-  vector<vector<pair<frCoord, frCoord>>> fourForbiddenRanges(4,
-                                                             forbiddenRanges);
-  vector<bool> fourForbidden(4, false);
-
-  auto bottomLayerNum = getDesign()->getTech()->getBottomLayerNum();
-  auto topLayerNum = getDesign()->getTech()->getTopLayerNum();
+  const auto bottomLayerNum = getDesign()->getTech()->getBottomLayerNum();
+  const auto topLayerNum = getDesign()->getTech()->getTopLayerNum();
 
   for (auto lNum = bottomLayerNum; lNum <= topLayerNum; lNum++) {
     if (tech_->getLayer(lNum)->getType() != dbTechLayerType::ROUTING) {
       continue;
     }
-    tech_->via2ViaForbiddenLen.push_back(eightForbiddenRanges);
-    tech_->via2ViaForbiddenOverlapLen.push_back(eightForbiddenRanges);
-    tech_->viaForbiddenTurnLen.push_back(fourForbiddenRanges);
-    tech_->viaForbiddenPlanarLen.push_back(fourForbiddenRanges);
-    tech_->line2LineForbiddenLen.push_back(fourForbiddenRanges);
-    tech_->viaForbiddenThrough.push_back(fourForbidden);
-    for (auto& ndr : tech_->nonDefaultRules) {
-      ndr->via2ViaForbiddenLen.push_back(eightForbiddenRanges);
-      ndr->viaForbiddenTurnLen.push_back(fourForbiddenRanges);
+    tech_->via2ViaForbiddenLen_.push_back({});
+    tech_->via2ViaPrlLen_.push_back({});
+    tech_->viaForbiddenTurnLen_.push_back({});
+    tech_->viaForbiddenPlanarLen_.push_back({});
+    tech_->line2LineForbiddenLen_.push_back({});
+    tech_->viaForbiddenThrough_.push_back({});
+    for (auto& ndr : tech_->nonDefaultRules_) {
+      ndr->via2ViaForbiddenLen_.push_back({});
+      ndr->viaForbiddenTurnLen_.push_back({});
     }
   }
 }
+
+}  // namespace drt

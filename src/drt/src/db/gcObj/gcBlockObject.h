@@ -26,33 +26,13 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _GC_BLOCKOBJECT_H_
-#define _GC_BLOCKOBJECT_H_
+#pragma once
 
 #include "db/obj/frBlockObject.h"
 #include "frBaseTypes.h"
 
-namespace fr {
+namespace drt {
 class gcBlockObject : public frBlockObject
 {
- public:
-  virtual ~gcBlockObject() {}
-  // getters
-  // setters
-  // others
- protected:
-  // constructors
-  gcBlockObject() : frBlockObject() {}
-  gcBlockObject(const gcBlockObject& in) : frBlockObject(in) {}
-
-  template <class Archive>
-  void serialize(Archive& ar, const unsigned int version)
-  {
-    (ar) & boost::serialization::base_object<frBlockObject>(*this);
-  }
-
-  friend class boost::serialization::access;
 };
-}  // namespace fr
-
-#endif
+}  // namespace drt

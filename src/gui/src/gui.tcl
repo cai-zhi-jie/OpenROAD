@@ -101,15 +101,28 @@ proc create_menu_item { args } {
 }
 
 sta::define_cmd_args "save_image" {[-area {x0 y0 x1 y1}] \
+                                   [-width width] \
                                    [-resolution microns_per_pixel] \
                                    [-display_option option] \
                                    path
-}
+}; # checker off
 
 proc save_image { args } {
-  set options [gui::parse_options $args]
+  ord::parse_list_args "save_image" args list {-display_option}
   sta::parse_key_args "save_image" args \
-    keys {-area -resolution -display_option} flags {}
+    keys {-area -width -resolution} flags {}; # checker off
+
+  set options [gui::DisplayControlMap]
+  foreach opt $list(-display_option) {
+    if {[llength $opt] != 2} {
+      utl::error GUI 19 "Display option must have 2 elements {control name} {value}."
+    }
+
+    set key [lindex $opt 0]
+    set val [lindex $opt 1]
+
+    $options set $key $val
+  }
 
   set resolution 0
   if { [info exists keys(-resolution)] } {
@@ -121,7 +134,8 @@ proc save_image { args } {
     set resolution [expr $keys(-resolution) * [$tech getLefUnits]]
     if {$resolution < 1} {
       set resolution 1.0
-      utl::warn GUI 31 "Resolution too high for design, defaulting to [expr $resolution / [$tech getLefUnits]] um per pixel"
+      set res_per_pixel [expr $resolution / [$tech getLefUnits]]
+      utl::warn GUI 31 "Resolution too high for design, defaulting to ${res_per_pixel}um per pixel"
     }
   }
 
@@ -133,43 +147,105 @@ proc save_image { args } {
     }
   }
 
+  set width 0
+  if { [info exists keys(-width)] } {
+    if {$resolution != 0} {
+      utl::error GUI 96 "Cannot set -width if -resolution has already been specified."
+    }
+    sta::check_positive_int "-width" $keys(-width)
+    set width $keys(-width)
+    if { $width == 0 } {
+      utl::error GUI 98 "Specified -width cannot be zero."
+    }
+  }
+
   sta::check_argc_eq1 "save_image" $args
   set path [lindex $args 0]
 
-  gui::save_image $path {*}$area $resolution $options
+  gui::save_image $path {*}$area $width $resolution $options
 
   # delete map
   rename $options ""
 }
 
+sta::define_cmd_args "save_clocktree_image" {
+  [-width width] \
+  [-height height] \
+  [-corner corner] \
+  -clock clock \
+  path
+}
+
+proc save_clocktree_image { args } {
+  sta::parse_key_args "save_clocktree_image" args \
+    keys {-clock -width -height -corner} flags {}
+
+  sta::check_argc_eq1 "save_clocktree_image" $args
+  set path [lindex $args 0]
+
+  set width 0
+  if { [info exists keys(-width)] } {
+    set width $keys(-width)
+  }
+  set height 0
+  if { [info exists keys(-height)] } {
+    set height $keys(-height)
+  }
+  set corner ""
+  if { [info exists keys(-corner)] } {
+    set corner $keys(-corner)
+  }
+
+  if { [info exists keys(-clock)] } {
+    set clock $keys(-clock)
+  } else {
+    utl:error GUI 88 "-clock is required"
+  }
+
+  gui::save_clocktree_image $path $clock $corner $width $height
+}
+
 sta::define_cmd_args "select" {-type object_type \
                                [-name name_regex] \
                                [-case_insensitive] \
-                               [-highlight group]
+                               [-highlight group] \
+                               [-filter attribute_and_value]
 }
 
 proc select { args } {
   sta::parse_key_args "select" args \
-    keys {-type -name -highlight} flags {-case_insensitive}
+    keys {-type -name -highlight -filter} flags {-case_insensitive}
   sta::check_argc_eq0 "select" $args
-  
+
   set type ""
   if { [info exists keys(-type)] } {
     set type $keys(-type)
   } else {
     utl::error GUI 38 "Must specify -type."
   }
-  
+
   set highlight -1
   if { [info exists keys(-highlight)] } {
     set highlight $keys(-highlight)
   }
-  
+
   set name ""
   if { [info exists keys(-name)] } {
     set name $keys(-name)
   }
-  
+
+  set attribute ""
+  set value ""
+  if { [info exists keys(-filter)] } {
+    set filter $keys(-filter)
+    set filter [split $filter "="]
+    if {[llength $filter] != 2} {
+      utl::error GUI 56 "Invalid syntax for -filter. Use -filter attribute=value."
+    }
+    set attribute [lindex $filter 0]
+    set value [lindex $filter 1]
+  }
+
   set case_sense 1
   if { [info exists flags(-case_insensitive)] } {
     if { $name == "" } {
@@ -177,8 +253,8 @@ proc select { args } {
     }
     set case_sense 0
   }
-  
-  return [gui::select $type $name $case_sense $highlight]
+
+  return [gui::select $type $name $attribute $value $case_sense $highlight]
 }
 
 sta::define_cmd_args "display_timing_cone" {pin \
@@ -231,29 +307,38 @@ proc display_timing_cone { args } {
   gui::timing_cone $term $fanin $fanout
 }
 
-namespace eval gui {
-  proc parse_options { args_var } {
-    set options [gui::DisplayControlMap]
-    while { $args_var != {} } {
-      set arg [lindex $args_var 0]
-      if { $arg == "-display_option" } {
-        set opt [lindex $args_var 1]
+sta::define_cmd_args "focus_net" {net \
+                                  [-remove] \
+                                  [-clear]
+}
 
-        if {[llength $opt] != 2} {
-          utl::error GUI 19 "Display option must have 2 elements {control name} {value}."
-        }
+proc focus_net { args } {
+  sta::parse_key_args "focus_net" args \
+    keys {} flags {-remove -clear}
+  if { [info exists flags(-clear)] } {
+    sta::check_argc_eq0 "focus_net" $args
 
-        set key [lindex $opt 0]
-        set val [lindex $opt 1]
+    gui::clear_focus_nets
+    return
+  }
 
-        $options set $key $val
+  sta::check_argc_eq1 "focus_net" $args
 
-        set args_var [lrange $args_var 1 end]
-      } else {
-        set args_var [lrange $args_var 1 end]
-      }
-    }
+  set block [ord::get_db_block]
+  if { $block == "NULL" } {
+    utl::error GUI 70 "Design not loaded."
+  }
 
-    return $options
+  set net_name [lindex $args 0]
+  set net [$block findNet $net_name]
+
+  if { $net == "NULL" } {
+    utl::error GUI 71 "Unable to find net \"$net_name\"."
+  }
+
+  if { [info exists flags(-remove)] } {
+    gui::remove_focus_net $net
+  } else {
+    gui::focus_net $net
   }
 }
