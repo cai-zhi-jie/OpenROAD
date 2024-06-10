@@ -160,16 +160,6 @@ endif()
 
 add_subdirectory(src)
 
-# After all compiled, look for the respective flags
-target_compile_definitions(openroad PRIVATE GPU)
-target_compile_definitions(openroad PRIVATE BUILD_PYTHON)
-target_compile_definitions(openroad PRIVATE BUILD_GUI)
-target_compile_definitions(openroad PRIVATE ENABLE_CHARTS)
-target_compile_definitions(openroad_shared PRIVATE GPU)
-target_compile_definitions(openroad_shared PRIVATE BUILD_PYTHON)
-target_compile_definitions(openroad_shared PRIVATE BUILD_GUI)
-target_compile_definitions(openroad_shared PRIVATE ENABLE_CHARTS)
-
 ####################################################################
 
 # Build man pages (Optional)

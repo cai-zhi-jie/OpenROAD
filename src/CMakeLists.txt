@@ -175,7 +175,7 @@ include(UseSWIG)
 find_package(Boost REQUIRED)
 message(STATUS "boost: ${Boost_VERSION}")
 find_package(Python3 COMPONENTS Development REQUIRED)
-option(BUILD_PYTHON "Build the Python3 interface" ON)
+option(BUILD_PYTHON "Build the Python3 interface" OFF)
 
 option(ALLOW_WARNINGS "Flag to allow compilation with compiler warnings: on by default" ON)
 if (NOT ALLOW_WARNINGS)
@@ -290,44 +290,51 @@ add_subdirectory(dst)
 
 ################################################################
 
-# add_library(openroad_shared SHARED
-#   ${OPENROAD_SOURCE}
+set(OPENROAD_LIB_SOURCE
+  Design.cc
+  Timing.cc
+  Tech.cc
+  OpenRoad.cc
+  Main_lib.cc
+  )
+# add_library(ord SHARED
+#   ${OPENROAD_LIB_SOURCE}
 # )
-add_library(openroad_shared STATIC
-  ${OPENROAD_SOURCE}
+add_library(ord STATIC
+  ${OPENROAD_LIB_SOURCE}
 )
 
-set_target_properties(openroad_shared PROPERTIES
-  OUTPUT_NAME "openroad"
-  VERSION 1.0
-  SOVERSION 1
-)
+# set_target_properties(ord PROPERTIES
+#   OUTPUT_NAME "openroad"
+#   VERSION 1.0
+#   SOVERSION 1
+# )
 
-target_compile_options(openroad_shared
+target_compile_options(ord
   PRIVATE
     -Wextra -pedantic -Wcast-qual
 )
 
 # Needed for boost stacktrace
 if(APPLE)
-  target_compile_definitions(openroad_shared PUBLIC "-D_GNU_SOURCE")
+  target_compile_definitions(ord PUBLIC "-D_GNU_SOURCE")
 endif()
 
-set_target_properties(openroad_shared PROPERTIES
+set_target_properties(ord PROPERTIES
   # Disable compiler specific extensions like gnu++11.
   CXX_EXTENSIONS OFF
   # Export symbols for stack trace printing
   ENABLE_EXPORTS ON
 )
 
-target_compile_features(openroad_shared PUBLIC cxx_std_17)
+target_compile_features(ord PUBLIC cxx_std_17)
 
-target_include_directories(openroad_shared
+target_include_directories(ord
   PUBLIC
     ../include
 )
 
-target_link_libraries(openroad_shared
+target_link_libraries(ord
   openroad_swig
   dpl
   dpo
@@ -349,7 +356,7 @@ target_link_libraries(openroad_shared
   ${CMAKE_THREAD_LIBS_INIT}
 )
 
-target_compile_definitions(openroad_shared PRIVATE BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+target_compile_definitions(ord PRIVATE BUILD_TYPE="${CMAKE_BUILD_TYPE}")
 
 ################################################################
 
@@ -425,9 +432,9 @@ if (TCL_READLINE_LIBRARY AND TCL_READLINE_H)
   target_compile_definitions(openroad PRIVATE ENABLE_READLINE)
   target_link_libraries(openroad ${TCL_READLINE_LIBRARY})
   target_include_directories(openroad PRIVATE ${TCL_READLINE_H})
-  target_compile_definitions(openroad_shared PRIVATE ENABLE_READLINE)
-  target_link_libraries(openroad_shared ${TCL_READLINE_LIBRARY})
-  target_include_directories(openroad_shared PRIVATE ${TCL_READLINE_H})
+  target_compile_definitions(ord PRIVATE ENABLE_READLINE)
+  target_link_libraries(ord ${TCL_READLINE_LIBRARY})
+  target_include_directories(ord PRIVATE ${TCL_READLINE_H})
   message(STATUS "TCL readline enabled")
 else()
   message(STATUS "TCL readline disabled")
@@ -437,9 +444,9 @@ if (BUILD_TCLX AND TCLX_LIBRARY AND TCLX_H)
   target_compile_definitions(openroad PRIVATE ENABLE_TCLX)
   target_link_libraries(openroad ${TCLX_LIBRARY})
   target_include_directories(openroad PRIVATE ${TCLX_H})
-  target_compile_definitions(openroad_shared PRIVATE ENABLE_TCLX)
-  target_link_libraries(openroad_shared ${TCLX_LIBRARY})
-  target_include_directories(openroad_shared PRIVATE ${TCLX_H})
+  target_compile_definitions(ord PRIVATE ENABLE_TCLX)
+  target_link_libraries(ord ${TCLX_LIBRARY})
+  target_include_directories(ord PRIVATE ${TCLX_H})
   message(STATUS "Tcl Extended enabled")
 else()
   message(STATUS "Tcl Extended disabled")
@@ -447,19 +454,19 @@ endif()
 
 if (ZLIB_FOUND)
   target_link_libraries(openroad ${ZLIB_LIBRARIES})
-  target_link_libraries(openroad_shared ${ZLIB_LIBRARIES})
+  target_link_libraries(ord ${ZLIB_LIBRARIES})
 endif()
 
 # Optional CUDD library for OpenSTA
 if (CUDD_LIB)
   target_link_libraries(openroad ${CUDD_LIB})
-  target_link_libraries(openroad_shared ${CUDD_LIB})
+  target_link_libraries(ord ${CUDD_LIB})
 endif()
 
 if (Python3_FOUND AND BUILD_PYTHON)
   message(STATUS "Python3 enabled")
   target_compile_definitions(openroad PRIVATE ENABLE_PYTHON3)
-  target_compile_definitions(openroad_shared PRIVATE ENABLE_PYTHON3)
+  target_compile_definitions(ord PRIVATE ENABLE_PYTHON3)
 
   swig_lib(NAME      openroad_swig_py
            NAMESPACE ord
@@ -498,7 +505,7 @@ if (Python3_FOUND AND BUILD_PYTHON)
     # dft_py
     # par_py
   )
-  target_link_libraries(openroad_shared
+  target_link_libraries(ord
     openroad_swig_py
     odb_py
     # ifp_py
@@ -548,7 +555,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_library(LIBRT rt)
   target_link_libraries(openroad ${LIBRT})
-  target_link_libraries(openroad_shared ${LIBRT})
+  target_link_libraries(ord ${LIBRT})
 endif()
 
 ################################################################
@@ -576,3 +583,13 @@ add_custom_target(openroad_tags etags -o TAGS
   WORKING_DIRECTORY ${OPENROAD_HOME}/src
   DEPENDS ${OPENROAD_SOURCE} ${OPENROAD_HEADERS} ${OPENROAD_TCL_FILES}
 )
+
+# After all compiled, look for the respective flags
+target_compile_definitions(openroad PRIVATE GPU)
+target_compile_definitions(openroad PRIVATE BUILD_PYTHON)
+target_compile_definitions(openroad PRIVATE BUILD_GUI)
+target_compile_definitions(openroad PRIVATE ENABLE_CHARTS)
+target_compile_definitions(ord PRIVATE GPU)
+target_compile_definitions(ord PRIVATE BUILD_PYTHON)
+target_compile_definitions(ord PRIVATE BUILD_GUI)
+target_compile_definitions(ord PRIVATE ENABLE_CHARTS)
