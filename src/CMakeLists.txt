@@ -175,7 +175,7 @@ include(UseSWIG)
 find_package(Boost REQUIRED)
 message(STATUS "boost: ${Boost_VERSION}")
 find_package(Python3 COMPONENTS Development REQUIRED)
-option(BUILD_PYTHON "Build the Python3 interface" OFF)
+option(BUILD_PYTHON "Build the Python3 interface" ON)
 
 option(ALLOW_WARNINGS "Flag to allow compilation with compiler warnings: on by default" ON)
 if (NOT ALLOW_WARNINGS)
@@ -534,19 +534,19 @@ else()
   message(STATUS "Python3 disabled")
 endif()
 
-messages(
-  TARGET openroad
-  SOURCE_DIR .
-  OUTPUT_DIR ..
-  LOCAL
-)
+# messages(
+#   TARGET openroad
+#   SOURCE_DIR .
+#   OUTPUT_DIR ..
+#   LOCAL
+# )
 
 # pad isn't a proper module with its own CMakeLists.txt so it
 # is handled here (just like the tcl encoding).
-messages(
-  TARGET openroad
-  OUTPUT_DIR pad
-)
+# messages(
+#   TARGET openroad
+#   OUTPUT_DIR pad
+# )
 
 # Ancient versions of glibc found on CentOS required librt.
 # OSX has an empty version of librt that causes a link error,
