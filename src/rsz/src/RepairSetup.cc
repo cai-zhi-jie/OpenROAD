@@ -429,7 +429,8 @@ bool RepairSetup::repairPath(PathRef& path,
       }
 
       // Pin swapping
-      if (!skip_pin_swap) {
+      // skip
+      if (0 && !skip_pin_swap) {
         if (swapPins(drvr_path, drvr_index, &expanded)) {
           changed = true;
           break;
@@ -439,7 +440,8 @@ bool RepairSetup::repairPath(PathRef& path,
       // For tristate nets all we can do is resize the driver.
       const bool tristate_drvr = resizer_->isTristateDriver(drvr_pin);
       dbNet* db_net = db_network_->staToDb(net);
-      if (fanout > 1
+      // skip rebuffer
+      if (0 && fanout > 1
           // Rebuffer blows up on large fanout nets.
           && fanout < rebuffer_max_fanout_ && !tristate_drvr
           && !resizer_->dontTouch(net) && !db_net->isConnectedByAbutment()) {
@@ -459,7 +461,8 @@ bool RepairSetup::repairPath(PathRef& path,
       }
 
       // Gate cloning
-      if (!skip_gate_cloning && fanout > split_load_min_fanout_
+      // skip
+      if (0 && !skip_gate_cloning && fanout > split_load_min_fanout_
           && !tristate_drvr && !resizer_->dontTouch(net)
           && resizer_->inserted_buffer_set_.find(
                  db_network_->instance(drvr_pin))
@@ -470,7 +473,8 @@ bool RepairSetup::repairPath(PathRef& path,
       }
 
       // Don't split loads on low fanout nets.
-      if (fanout > split_load_min_fanout_ && !tristate_drvr
+      // skip
+      if (0 && fanout > split_load_min_fanout_ && !tristate_drvr
           && !resizer_->dontTouch(net) && !db_net->isConnectedByAbutment()) {
         const int init_buffer_count = inserted_buffer_count_;
         splitLoads(drvr_path, drvr_index, path_slack, &expanded);
