@@ -172,7 +172,7 @@ if (SWIG_VERSION VERSION_GREATER_EQUAL "4.1.0")
 endif()
 include(UseSWIG)
 
-find_package(Boost REQUIRED)
+find_package(Boost 1.80.0 REQUIRED)
 message(STATUS "boost: ${Boost_VERSION}")
 
 if (ENABLE_TESTS)
