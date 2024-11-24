@@ -916,9 +916,14 @@ std::vector<odb::Point> GlobalRouter::findOnGridPositions(
   has_access_points
       = findPinAccessPointPositions(pin, ap_positions) && !skip_drt_aps_;
 
+  if (skip_drt_aps_) {
+    std::cout << "skip_drt_aps_ = " << skip_drt_aps_ << std::endl;
+  }
   std::vector<odb::Point> positions_on_grid;
 
   if (has_access_points) {
+    // no access point have being set yet, may require additional function call
+    std::cout << "has_access_points" << std::endl;
     for (const auto& ap_position : ap_positions) {
       pos_on_grid = ap_position.second;
       positions_on_grid.push_back(pos_on_grid);
@@ -960,7 +965,7 @@ void GlobalRouter::findPins(Net* net)
     // check if the pin has access points to avoid changing the position on grid
     // when the pin overlaps with a single track.
     // this way, the result based on drt APs is maintained
-    if (!has_access_points && pinOverlapsWithSingleTrack(pin, pos_on_grid)) {
+    if (0 && !has_access_points && pinOverlapsWithSingleTrack(pin, pos_on_grid)) {
       const int conn_layer = pin.getConnectionLayer();
       odb::dbTechLayer* layer = routing_layers_[conn_layer];
       pos_on_grid = grid_->getPositionOnGrid(pos_on_grid);
@@ -2428,6 +2433,7 @@ void GlobalRouter::readSegments(const char* file_name)
     if (line == "(" || line.empty() || line == ")") {
       continue;
     }
+    // std::cout << __LINE__ << " : " << line << std::endl;
 
     std::stringstream ss(line);
     std::string word;
@@ -2457,6 +2463,12 @@ void GlobalRouter::readSegments(const char* file_name)
                        stoi(tokens[3]),
                        stoi(tokens[4]),
                        layer2->getRoutingLevel());
+      // std::cout << "read segment : " << stoi(tokens[0]) << " " <<
+      //                  stoi(tokens[1]) << " " <<
+      //                  layer1->getRoutingLevel() << " " <<
+      //                  stoi(tokens[3]) << " " <<
+      //                  stoi(tokens[4]) << " " <<
+      //                  layer2->getRoutingLevel() << std::endl;
       routes_[db_net].push_back(segment);
     } else {
       logger_->error(
@@ -2469,6 +2481,7 @@ void GlobalRouter::readSegments(const char* file_name)
           GRT, 262, "Net {} has disconnected segments.", db_net->getName());
     }
     std::string pins_not_covered;
+    // std::cout << "#seg = " << segments.size() << std::endl;
     if (!netIsCovered(db_net, pins_not_covered)) {
       logger_->error(GRT,
                      263,
@@ -2477,6 +2490,7 @@ void GlobalRouter::readSegments(const char* file_name)
                      db_net->getName());
     }
   }
+  std::cout << "read in " << routes_.size() << " net" << std::endl;
 }
 
 bool GlobalRouter::netIsCovered(odb::dbNet* db_net,
@@ -2518,6 +2532,18 @@ bool GlobalRouter::segmentCoversPin(const GSegment& segment, const Pin& pin)
   auto [min_y, max_y] = std::minmax(segment.init_y, segment.final_y);
   auto [min_layer, max_layer]
       = std::minmax(segment.init_layer, segment.final_layer);
+  // std::cout << pin.getName() << " in " << pin.getOnGridPosition().getX() << " "
+  //           << pin.getOnGridPosition().getY() << " " << pin.getConnectionLayer() << std::endl;
+  // std::cout << "x = " << min_x << " - " << max_x << ", y = " << min_y << " - " << max_y << ", z = " << min_layer << " - " << max_layer << std::endl;
+  // bool is_cover = (pin.getOnGridPosition().getX() >= min_x
+  //         && pin.getOnGridPosition().getX() <= max_x
+  //         // Pin is vertically covered by the segment
+  //         && pin.getOnGridPosition().getY() >= min_y
+  //         && pin.getOnGridPosition().getY() <= max_y
+  //         // Pin and segment share a layer
+  //         && pin.getConnectionLayer() >= min_layer
+  //         && pin.getConnectionLayer() <= max_layer);
+  // std::cout << "is cover = " << is_cover << std::endl;
   return (pin.getOnGridPosition().getX() >= min_x
           && pin.getOnGridPosition().getX() <= max_x
           // Pin is vertically covered by the segment

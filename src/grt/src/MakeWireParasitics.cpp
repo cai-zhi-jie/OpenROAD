@@ -73,6 +73,8 @@ MakeWireParasitics::MakeWireParasitics(utl::Logger* logger,
       min_max_(sta::MinMax::max()),
       resistor_id_(1)
 {
+  std::cout << "# corner = " << (*sta_->corners()).count() << std::endl;
+  std::cout << "min_max  = " << min_max_->index() << std::endl;
 }
 
 void MakeWireParasitics::estimateParasitcs(odb::dbNet* net,
@@ -97,9 +99,11 @@ void MakeWireParasitics::estimateParasitcs(odb::dbNet* net,
 
   sta::Net* sta_net = network_->dbToSta(net);
 
+  // std::cout << "# corner = " << (*sta_->corners()).count() << std::endl;
+  // std::cout << "min_max  = " << min_max_->index() << std::endl;
   for (sta::Corner* corner : *sta_->corners()) {
     NodeRoutePtMap node_map;
-
+    // std::cout << "corner = " << corner->index() << std::endl;
     sta::ParasiticAnalysisPt* analysis_point
         = corner->findParasiticAnalysisPt(min_max_);
     sta::Parasitic* parasitic
@@ -218,6 +222,9 @@ void MakeWireParasitics::makeRouteParasitics(
     if (wire_length_dbu == 0) {
       // via
       int lower_layer = min(segment.init_layer, segment.final_layer);
+      if (std::abs(segment.init_layer - segment.final_layer) != 1) {
+        std::cout << "lower_layer: " << lower_layer << ", higher_layer: " << std::max(segment.init_layer, segment.final_layer) << std::endl;
+      }
       odb::dbTechLayer* cut_layer
           = tech_->findRoutingLayer(lower_layer)->getUpperLayer();
       res = getCutLayerRes(cut_layer, corner);
@@ -462,19 +469,22 @@ void MakeWireParasitics::layerRC(int wire_length_dbu,
   double r_per_meter = 0.0;    // ohm/meter
   double cap_per_meter = 0.0;  // F/meter
   resizer_->layerRC(layer, corner, r_per_meter, cap_per_meter);
+  // std::cout << layer->getNumber() << "LayerRC = " << r_per_meter << " " << cap_per_meter << std::endl;
 
   const float layer_width = block_->dbuToMicrons(layer->getWidth());
   if (r_per_meter == 0.0) {
+    std::cout << "layer_id: " << layer_id << " " << layer->getNumber() << " have not layerR" << std::endl;
     const float res_ohm_per_micron = layer->getResistance() / layer_width;
     r_per_meter = 1E+6 * res_ohm_per_micron;  // ohm/meter
   }
 
   if (cap_per_meter == 0.0) {
+    std::cout << "layer_id: " << layer_id << " " << layer->getNumber() << " have not layerC" << std::endl;
     const float cap_pf_per_micron = layer_width * layer->getCapacitance()
                                     + 2 * layer->getEdgeCapacitance();
     cap_per_meter = 1E+6 * 1E-12 * cap_pf_per_micron;  // F/meter
   }
-
+  // std::cout << "tech_->getDbUnitsPerMicron() = " << tech_->getDbUnitsPerMicron() << std::endl;
   const float wire_length = dbuToMeters(wire_length_dbu);
   res = r_per_meter * wire_length;
   cap = cap_per_meter * wire_length;
@@ -568,7 +578,10 @@ float MakeWireParasitics::getCutLayerRes(odb::dbTechLayer* cut_layer,
   double cap = 0.0;
   resizer_->layerRC(cut_layer, corner, res, cap);
   if (res == 0.0) {
+    // std::cout << "cut_layer_id: " << cut_layer->getNumber() << " have not layerR, default res = " << cut_layer->getResistance() << std::endl;
     res = cut_layer->getResistance();  // assumes single cut
+  } else {
+    std::cout << "cut_layer_id: " << cut_layer->getNumber() << " layerR = " << res << std::endl;
   }
   return res / num_cuts;
 }
